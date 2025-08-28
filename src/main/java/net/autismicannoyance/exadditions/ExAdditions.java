@@ -1,6 +1,7 @@
 package net.autismicannoyance.exadditions;
 
 import com.mojang.logging.LogUtils;
+import net.autismicannoyance.exadditions.block.ModBlocks;
 import net.autismicannoyance.exadditions.item.ModCreativeModeTabs;
 import net.autismicannoyance.exadditions.item.ModItems;
 import net.minecraft.world.item.CreativeModeTabs;
@@ -33,6 +34,7 @@ public class ExAdditions
         ModCreativeModeTabs.register(modEventBus);
 
         ModItems.register(modEventBus);
+        ModBlocks.register(modEventBus);
 
         modEventBus.addListener(this::commonSetup);
 

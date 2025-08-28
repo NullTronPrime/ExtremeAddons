@@ -2,5 +2,8 @@
   "item.exadditions.sapphire": "Sapphire",
   "item.exadditions.raw_sapphire": "Raw Sapphire",
 
+  "block.exadditions.sapphire_block" : "Block of sapphire",
+  "block.exadditions.raw_sapphire_block" : "Block of raw sapphire",
+
   "creativetab.additions_tab":"Additions"
 }
