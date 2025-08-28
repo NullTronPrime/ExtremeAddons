@@ -1,9 +1,17 @@
 {
   "item.exadditions.sapphire": "Sapphire",
   "item.exadditions.raw_sapphire": "Raw Sapphire",
+  "item.exadditions.metal_detector": "Metal detector",
+  "item.exadditions.metal_detector_v2": "Metal detector MKII",
 
   "block.exadditions.sapphire_block" : "Block of sapphire",
   "block.exadditions.raw_sapphire_block" : "Block of raw sapphire",
+
+  "block.exadditions.sapphire_ore": "Sapphire Ore",
+  "block.exadditions.deepslate_sapphire_ore": "Deepslate Sapphire Ore",
+  "block.exadditions.end_stone_sapphire_ore": "Endstone Sapphire Ore",
+  "block.exadditions.nether_sapphire_ore": "Nether Sapphire Ore",
+
 
   "creativetab.additions_tab":"Additions"
 }
