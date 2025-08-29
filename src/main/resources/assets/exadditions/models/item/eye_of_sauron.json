@@ -1,0 +1,8 @@
+{
+  "parent": "item/generated",
+  "textures": { "layer0": "exadditions:item/eye_of_sauron_1" },
+  "overrides": [
+    { "predicate": { "firing": 0.5 }, "model": "exadditions:item/eye_of_sauron_1" },
+    { "predicate": { "firing": 1.0 }, "model": "exadditions:item/eye_of_sauron_2" }
+  ]
+}

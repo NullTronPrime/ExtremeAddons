@@ -1,7 +1,6 @@
 package net.autismicannoyance.exadditions.item;
 import net.autismicannoyance.exadditions.ExAdditions;
-import net.autismicannoyance.exadditions.item.custom.MetalDetectorItem;
-import net.autismicannoyance.exadditions.item.custom.MetalDetectorV2Item;
+import net.autismicannoyance.exadditions.item.custom.*;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.registries.DeferredRegister;
@@ -25,6 +24,33 @@ public class ModItems {
 
     public static final RegistryObject<Item> METAL_DETECTOR_V2 = ITEMS.register("metal_detector_v2",
             () -> new MetalDetectorV2Item(new Item.Properties().durability(500)));
+
+    public static final RegistryObject<Item> FIRE_RESIST_CHARM = ITEMS.register("fire_resist_charm",
+            () -> new FireResistCharmItem(new Item.Properties()
+                    .stacksTo(1)       // only one per stack
+                    .fireResistant()   // can’t burn in lava/fire
+            ));
+    public static final RegistryObject<Item> BLAST_RESIST_CHARM = ITEMS.register("blast_resist_charm",
+            () -> new FireResistCharmItem(new Item.Properties()
+                    .stacksTo(1)
+            ));
+    public static final RegistryObject<Item> DEATH_CHARM = ITEMS.register("death_charm",
+            () -> new DeathCharmItem(new Item.Properties()
+                    .stacksTo(1)
+                    .fireResistant() // mark item as fireResistant so it won't burn as an ItemStack
+            ));
+
+    public static final RegistryObject<Item> REFLECT_CHARM = ITEMS.register("reflect_charm",
+            () -> new Item(new Item.Properties()
+                    .stacksTo(1)
+                    .fireResistant()
+            ));
+    public static final RegistryObject<Item> MOMENTUM_BATTERY = ITEMS.register("momentum_battery",
+            () -> new MomentumBatteryItem(new Item.Properties().durability(128).fireResistant()));
+
+    public static final RegistryObject<Item> EYE_OF_SAURON = ITEMS.register("eye_of_sauron",
+            () -> new EyeOfSauronItem(new Item.Properties().fireResistant()));
+
 
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);

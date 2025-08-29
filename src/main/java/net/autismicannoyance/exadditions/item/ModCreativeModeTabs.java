@@ -22,6 +22,12 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModItems.RAW_SAPPHIRE.get());
                         pOutput.accept(ModItems.METAL_DETECTOR.get());
                         pOutput.accept(ModItems.METAL_DETECTOR_V2.get());
+                        pOutput.accept(ModItems.FIRE_RESIST_CHARM.get());
+                        pOutput.accept(ModItems.REFLECT_CHARM.get());
+                        pOutput.accept(ModItems.MOMENTUM_BATTERY.get());
+                        pOutput.accept(ModItems.EYE_OF_SAURON.get());
+                        pOutput.accept(ModItems.BLAST_RESIST_CHARM.get());
+                        pOutput.accept(ModItems.DEATH_CHARM.get());
                         pOutput.accept(ModBlocks.SAPPHIRE_BLOCK.get());
                         pOutput.accept(ModBlocks.RAW_SAPPHIRE_BLOCK.get());
                         pOutput.accept(ModBlocks.SAPPHIRE_ORE.get());

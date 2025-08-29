@@ -3,6 +3,12 @@
   "item.exadditions.raw_sapphire": "Raw Sapphire",
   "item.exadditions.metal_detector": "Metal detector",
   "item.exadditions.metal_detector_v2": "Metal detector MKII",
+  "item.exadditions.fire_resist_charm": "Fire charm",
+  "item.exadditions.reflect_charm": "Charm of reflection",
+  "item.exadditions.momentum_battery": "Battery",
+  "item.exadditions.eye_of_sauron": "Eye of sauron",
+  "item.exadditions.blast_resist_charm": "Blast charm",
+  "item.exadditions.death_charm": "Death charm",
 
   "block.exadditions.sapphire_block" : "Block of sapphire",
   "block.exadditions.raw_sapphire_block" : "Block of raw sapphire",
