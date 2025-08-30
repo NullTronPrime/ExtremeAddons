@@ -17,8 +17,7 @@ public class BlastResistCharmEvents {
         // Check if damage is from explosion
         if (event.getSource().is(DamageTypeTags.IS_EXPLOSION)) {
             if (player.getInventory().contains(ModItems.BLAST_RESIST_CHARM.get().getDefaultInstance())) {
-                // Reduce explosion damage by 80% (take only 20%)
-                event.setAmount(event.getAmount() * 0.2f);
+                event.setAmount(event.getAmount() * 0.8f);
             }
         }
     }

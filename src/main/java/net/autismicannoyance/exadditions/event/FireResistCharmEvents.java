@@ -16,7 +16,7 @@ public class FireResistCharmEvents {
 
         if (event.getSource().is(DamageTypeTags.IS_FIRE)) {
             if (player.getInventory().contains(ModItems.FIRE_RESIST_CHARM.get().getDefaultInstance())) {
-                event.setAmount(event.getAmount() * 0.2f); // reduce fire damage by 80%
+                event.setAmount(event.getAmount() * 0.8f); // reduce fire damage by 20%
             }
         }
     }

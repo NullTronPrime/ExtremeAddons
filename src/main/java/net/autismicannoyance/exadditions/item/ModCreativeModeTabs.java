@@ -19,6 +19,7 @@ public class ModCreativeModeTabs {
                     .title(Component.translatable("creativetab.additions_tab"))
                     .displayItems((pParameters,pOutput)->{
                         pOutput.accept(ModItems.SAPPHIRE.get());
+                        pOutput.accept(ModItems.STRAWBERRY.get());
                         pOutput.accept(ModItems.RAW_SAPPHIRE.get());
                         pOutput.accept(ModItems.METAL_DETECTOR.get());
                         pOutput.accept(ModItems.METAL_DETECTOR_V2.get());
@@ -27,6 +28,7 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModItems.MOMENTUM_BATTERY.get());
                         pOutput.accept(ModItems.EYE_OF_SAURON.get());
                         pOutput.accept(ModItems.BLAST_RESIST_CHARM.get());
+                        pOutput.accept(ModItems.CALIBRATED_BLAST_CHARM.get());
                         pOutput.accept(ModItems.DEATH_CHARM.get());
                         pOutput.accept(ModItems.BLOOD_CHARM.get());
                         pOutput.accept(ModBlocks.SAPPHIRE_BLOCK.get());
@@ -36,6 +38,7 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModBlocks.NETHER_SAPPHIRE_ORE.get());
                         pOutput.accept(ModBlocks.END_STONE_SAPPHIRE_ORE.get());
                         pOutput.accept(ModBlocks.SOUND_BLOCK.get());
+                        pOutput.accept(ModItems.CHRONOS_IMPLEMENT.get());
 
                     })
                     .build());
