@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "exadditions:block/sound_block" }
+  }
+}
