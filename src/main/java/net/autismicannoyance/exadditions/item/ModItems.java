@@ -40,6 +40,12 @@ public class ModItems {
                     .fireResistant() // mark item as fireResistant so it won't burn as an ItemStack
             ));
 
+    public static final RegistryObject<Item> BLOOD_CHARM = ITEMS.register("blood_charm",
+            () -> new BloodCharmItem(new Item.Properties()
+                    .stacksTo(1)
+                    .fireResistant() // mark item as fireResistant so it won't burn as an ItemStack
+            ));
+
     public static final RegistryObject<Item> REFLECT_CHARM = ITEMS.register("reflect_charm",
             () -> new Item(new Item.Properties()
                     .stacksTo(1)
