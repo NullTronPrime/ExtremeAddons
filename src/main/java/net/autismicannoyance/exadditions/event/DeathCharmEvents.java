@@ -5,20 +5,19 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.GameRules;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.item.ItemExpireEvent;
 import net.minecraftforge.event.entity.item.ItemTossEvent;
 import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
+import net.minecraftforge.event.entity.player.EntityItemPickupEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.level.ExplosionEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
@@ -34,7 +33,7 @@ public class DeathCharmEvents {
     private static final String DEATH_CHARM_SLOT_TAG = "DeathCharmSlot";
     private static final String DEATH_CHARM_DATA_TAG = "DeathCharmData";
 
-    /** When player dies, record the source of death */
+    /** When player dies, record the source of death ONLY in the current charm */
     @SubscribeEvent
     public static void onDeath(LivingDeathEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
@@ -45,22 +44,21 @@ public class DeathCharmEvents {
         DamageSource source = event.getSource();
         String key = getDeathKey(source);
 
-        // Save into player persistent data
-        CompoundTag persistent = player.getPersistentData();
-        CompoundTag persisted = persistent.getCompound(Player.PERSISTED_NBT_TAG);
+        // Initialize the charm with a unique ID if it doesn't have one
+        CompoundTag itemTag = charm.getOrCreateTag();
+        if (!itemTag.contains("CharmUUID")) {
+            itemTag.putString("CharmUUID", java.util.UUID.randomUUID().toString());
+        }
 
-        CompoundTag map = persisted.getCompound(DeathCharmItem.DEATH_MAP_TAG);
+        // Store data ONLY in THIS charm's NBT, never in player data
+        CompoundTag map = itemTag.getCompound(DeathCharmItem.DEATH_MAP_TAG);
         int prev = map.getInt(key);
         map.putInt(key, prev + 1);
+        itemTag.put(DeathCharmItem.DEATH_MAP_TAG, map);
 
-        persisted.put(DeathCharmItem.DEATH_MAP_TAG, map);
-        persistent.put(Player.PERSISTED_NBT_TAG, persisted);
-
-        // Also copy into item NBT so tooltip works
-        CompoundTag itemTag = charm.getOrCreateTag();
-        itemTag.put(DeathCharmItem.DEATH_MAP_TAG, map.copy());
-
-        // Store the charm's slot and data for restoration
+        // Store the charm's slot and data for restoration after respawn
+        CompoundTag persistent = player.getPersistentData();
+        CompoundTag persisted = persistent.getCompound(Player.PERSISTED_NBT_TAG);
         int slot = getDeathCharmSlot(player);
         if (slot != -1) {
             persisted.putInt(DEATH_CHARM_SLOT_TAG, slot);
@@ -68,7 +66,7 @@ public class DeathCharmEvents {
         }
     }
 
-    /** Apply reductions */
+    /** Apply damage reductions with scaled exponential formula - reads ONLY from current charm */
     @SubscribeEvent
     public static void onDamage(LivingDamageEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
@@ -79,11 +77,15 @@ public class DeathCharmEvents {
         DamageSource source = event.getSource();
         String key = getDeathKey(source);
 
-        CompoundTag map = charm.getOrCreateTag().getCompound(DeathCharmItem.DEATH_MAP_TAG);
+        // Read death count ONLY from this specific charm's NBT data
+        CompoundTag itemTag = charm.getOrCreateTag();
+        CompoundTag map = itemTag.getCompound(DeathCharmItem.DEATH_MAP_TAG);
 
-        int deaths = map.getInt(key);
+        int deaths = map.getInt(key); // This will be 0 for new charms
         if (deaths > 0) {
-            double multiplier = Math.pow(0.5, deaths);
+            // Exponential scaling: 10 deaths = 50%, 20 deaths = 75%, 30 deaths = 87.5%, etc.
+            // Formula: multiplier = 0.5^(deaths/10)
+            double multiplier = Math.pow(0.5, deaths / 10.0);
             float newAmount = (float) (event.getAmount() * multiplier);
             event.setAmount(newAmount);
         }
@@ -112,7 +114,7 @@ public class DeathCharmEvents {
         CompoundTag persisted = persistent.getCompound(Player.PERSISTED_NBT_TAG);
 
         if (persisted.contains(DEATH_CHARM_DATA_TAG)) {
-            // Restore the charm to the same slot
+            // Restore the exact same charm instance with all its data
             ItemStack charm = ItemStack.of(persisted.getCompound(DEATH_CHARM_DATA_TAG));
             int slot = persisted.getInt(DEATH_CHARM_SLOT_TAG);
 
@@ -138,25 +140,8 @@ public class DeathCharmEvents {
     public static void onItemExpire(ItemExpireEvent event) {
         if (event.getEntity().getItem().getItem() instanceof DeathCharmItem) {
             event.setCanceled(true);
-            // Reset the age to keep it fresh
+            // Set unlimited lifetime
             event.getEntity().setUnlimitedLifetime();
-        }
-    }
-
-    /** Handle Death Charm falling into void - teleport to world spawn */
-    @SubscribeEvent
-    public static void onEntityJoinLevel(EntityJoinLevelEvent event) {
-        if (!(event.getEntity() instanceof ItemEntity itemEntity)) return;
-        if (!(itemEntity.getItem().getItem() instanceof DeathCharmItem)) return;
-        if (!(event.getLevel() instanceof ServerLevel serverLevel)) return;
-
-        // Check if the item is below Y-level -64 (void level in most dimensions)
-        if (itemEntity.getY() < -64) {
-            BlockPos spawnPos = serverLevel.getSharedSpawnPos();
-            // Teleport to world spawn with a bit of height to prevent getting stuck
-            itemEntity.teleportTo(spawnPos.getX() + 0.5, spawnPos.getY() + 1, spawnPos.getZ() + 0.5);
-            // Reset velocity to prevent it from continuing to fall
-            itemEntity.setDeltaMovement(0, 0, 0);
         }
     }
 
@@ -172,15 +157,53 @@ public class DeathCharmEvents {
         });
     }
 
-    /** Track when Death Charm is tossed to handle void teleportation */
+    /** Make Death Charm invulnerable and handle void teleportation when tossed */
     @SubscribeEvent
     public static void onItemToss(ItemTossEvent event) {
         if (!(event.getEntity().getItem().getItem() instanceof DeathCharmItem)) return;
 
-        // Add a custom tag to track this as a Death Charm for void detection
+        // Make the item invulnerable to all damage (cactus, fire, etc.)
         ItemEntity itemEntity = event.getEntity();
+        itemEntity.setInvulnerable(true);
+
+        // Add a custom tag to track this as a Death Charm
         CompoundTag entityData = itemEntity.getPersistentData();
         entityData.putBoolean("DeathCharm", true);
+    }
+
+    /** Make any Death Charm item entity invulnerable and handle void teleportation */
+    @SubscribeEvent
+    public static void onDeathCharmSpawn(EntityJoinLevelEvent event) {
+        if (!(event.getEntity() instanceof ItemEntity itemEntity)) return;
+        if (!(itemEntity.getItem().getItem() instanceof DeathCharmItem)) return;
+
+        // Make invulnerable to prevent damage from cactus, fire, lava, etc.
+        itemEntity.setInvulnerable(true);
+
+        // Handle void teleportation
+        if (!(event.getLevel() instanceof ServerLevel serverLevel)) return;
+        if (itemEntity.getY() < -64) {
+            BlockPos spawnPos = serverLevel.getSharedSpawnPos();
+            // Teleport to world spawn with a bit of height to prevent getting stuck
+            itemEntity.teleportTo(spawnPos.getX() + 0.5, spawnPos.getY() + 1, spawnPos.getZ() + 0.5);
+            // Reset velocity to prevent it from continuing to fall
+            itemEntity.setDeltaMovement(0, 0, 0);
+        }
+    }
+
+    /** Ensure Death Charm is properly initialized when picked up (starts fresh) */
+    @SubscribeEvent
+    public static void onItemPickup(EntityItemPickupEvent event) {
+        ItemStack stack = event.getItem().getItem();
+        if (stack.getItem() instanceof DeathCharmItem) {
+            CompoundTag itemTag = stack.getOrCreateTag();
+            // Only initialize if it doesn't already have a UUID (brand new charm)
+            if (!itemTag.contains("CharmUUID")) {
+                itemTag.putString("CharmUUID", java.util.UUID.randomUUID().toString());
+                // Ensure it starts with completely empty death data
+                itemTag.put(DeathCharmItem.DEATH_MAP_TAG, new CompoundTag());
+            }
+        }
     }
 
     /**

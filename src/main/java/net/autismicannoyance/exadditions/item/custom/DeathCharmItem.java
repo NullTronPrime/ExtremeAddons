@@ -20,7 +20,9 @@ public class DeathCharmItem extends Item {
 
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
-        CompoundTag tag = stack.getOrCreateTag().getCompound(DEATH_MAP_TAG);
+        // Read ONLY from this specific item's NBT data, not player data
+        CompoundTag itemTag = stack.getOrCreateTag();
+        CompoundTag tag = itemTag.getCompound(DEATH_MAP_TAG);
 
         if (tag.isEmpty()) {
             tooltip.add(Component.literal(ChatFormatting.GRAY + "No deaths recorded yet"));
@@ -29,9 +31,10 @@ public class DeathCharmItem extends Item {
             for (String key : tag.getAllKeys()) {
                 int deaths = tag.getInt(key);
                 if (deaths > 0) {
-                    double reduction = 1 - Math.pow(0.5, deaths);
+                    // Updated formula to match the new scaling (deaths/10)
+                    double reduction = 1 - Math.pow(0.5, deaths / 10.0);
                     int percent = (int) Math.round(reduction * 100);
-                    tooltip.add(Component.literal(" - " + prettyName(key) + ": " + percent + "% reduced")
+                    tooltip.add(Component.literal(" - " + prettyName(key) + ": " + deaths + " deaths (" + percent + "% reduced)")
                             .withStyle(ChatFormatting.GREEN));
                 }
             }
