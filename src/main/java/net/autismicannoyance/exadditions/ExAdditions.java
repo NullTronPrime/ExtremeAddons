@@ -1,4 +1,5 @@
 package net.autismicannoyance.exadditions;
+import net.autismicannoyance.exadditions.enchantment.ModEnchantments;
 import net.minecraft.client.renderer.item.ItemProperties;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -38,6 +39,7 @@ public class ExAdditions {
 
         ModItems.register(modEventBus);
         ModBlocks.register(modEventBus);
+        ModEnchantments.register(modEventBus);
 
         modEventBus.addListener(this::commonSetup);
 

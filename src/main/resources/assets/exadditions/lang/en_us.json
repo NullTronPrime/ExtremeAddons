@@ -25,5 +25,8 @@
   "block.exadditions.nether_sapphire_ore": "Nether Sapphire Ore",
 
 
-  "creativetab.additions_tab":"Additions"
+  "creativetab.additions_tab":"Additions",
+
+  "enchantment.exadditions.ring_capacity": "Ring Capacity",
+  "enchantment.exadditions.ring_capacity.desc": "Increases the maximum number of protective rings that can be generated."
 }
