@@ -12,8 +12,10 @@
   "item.exadditions.blood_charm": "Blood charm",
   "item.exadditions.chronos_implement": "Chronos implement",
 
+
   "item.exadditions.strawberry": "Strawberry",
   "item.exadditions.pine_cone": "Pine cone",
+  "item.exadditions.chaos_fruit": "Chaos Fruit",
 
   "block.exadditions.sapphire_block" : "Block of sapphire",
   "block.exadditions.raw_sapphire_block" : "Block of raw sapphire",
@@ -26,6 +28,22 @@
 
 
   "creativetab.additions_tab":"Additions",
+
+  "effect.exadditions.enderosis": "Enderosis",
+  "effect.exadditions.enderosis.description": "Teleports you away from projectiles and water contact, but damages you when touching water",
+
+  "item.minecraft.potion.effect.enderosis": "Potion of Enderosis",
+  "item.minecraft.splash_potion.effect.enderosis": "Splash Potion of Enderosis",
+  "item.minecraft.lingering_potion.effect.enderosis": "Lingering Potion of Enderosis",
+
+  "item.minecraft.potion.effect.long_enderosis": "Potion of Enderosis",
+  "item.minecraft.splash_potion.effect.long_enderosis": "Splash Potion of Enderosis",
+  "item.minecraft.lingering_potion.effect.long_enderosis": "Lingering Potion of Enderosis",
+
+  "item.minecraft.potion.effect.strong_enderosis": "Potion of Enderosis",
+  "item.minecraft.splash_potion.effect.strong_enderosis": "Splash Potion of Enderosis",
+  "item.minecraft.lingering_potion.effect.strong_enderosis": "Lingering Potion of Enderosis",
+
 
   "enchantment.exadditions.ring_capacity": "Ring Capacity",
   "enchantment.exadditions.ring_capacity.desc": "Increases the maximum number of protective rings that can be generated."

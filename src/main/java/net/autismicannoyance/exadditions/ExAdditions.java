@@ -1,5 +1,8 @@
 package net.autismicannoyance.exadditions;
+import net.autismicannoyance.exadditions.effect.ModEffects;
 import net.autismicannoyance.exadditions.enchantment.ModEnchantments;
+import net.autismicannoyance.exadditions.potion.ModPotions;
+import net.autismicannoyance.exadditions.util.ModBrewingRecipes;
 import net.minecraft.client.renderer.item.ItemProperties;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -40,6 +43,8 @@ public class ExAdditions {
         ModItems.register(modEventBus);
         ModBlocks.register(modEventBus);
         ModEnchantments.register(modEventBus);
+        ModEffects.register(modEventBus);
+        ModPotions.register(modEventBus);
 
         modEventBus.addListener(this::commonSetup);
 
@@ -50,6 +55,7 @@ public class ExAdditions {
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
+        ModBrewingRecipes.registerBrewingRecipes(event);
     }
 
     // Add the example block item to the building blocks tab
