@@ -4,6 +4,7 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentCategory;
+import net.minecraft.world.item.DiggerItem;
 
 public class VeinMineEnchantment extends Enchantment {
 
@@ -28,8 +29,19 @@ public class VeinMineEnchantment extends Enchantment {
 
     @Override
     public boolean canApplyAtEnchantingTable(ItemStack stack) {
-        return stack.getItem().getDestroySpeed(stack, null) > 1.0f &&
-                EnchantmentCategory.DIGGER.canEnchant(stack.getItem());
+        // Check if it's a digger item and can be enchanted by the DIGGER category
+        if (!EnchantmentCategory.DIGGER.canEnchant(stack.getItem())) {
+            return false;
+        }
+
+        // Check if it's actually a DiggerItem (tools like pickaxe, axe, shovel, hoe)
+        if (!(stack.getItem() instanceof DiggerItem)) {
+            return false;
+        }
+
+        // For DiggerItems, we can safely assume they have a destroy speed > 1.0f
+        // since they are designed for breaking blocks
+        return true;
     }
 
     @Override

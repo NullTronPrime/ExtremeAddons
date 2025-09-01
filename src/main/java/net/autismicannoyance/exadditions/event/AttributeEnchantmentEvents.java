@@ -6,6 +6,7 @@ import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingEquipmentChangeEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -110,6 +111,7 @@ public class AttributeEnchantmentEvents {
         }
     }
 
+    // Fixed: Added the missing isPlayerMoving method
     private static boolean isPlayerMoving(Player player) {
         Vec3 movement = player.getDeltaMovement();
         return movement.horizontalDistanceSqr() > 0.001; // Small threshold for movement

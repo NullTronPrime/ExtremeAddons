@@ -40,7 +40,6 @@ public class ProjectileEnchantmentEvents {
         if (frostLevel > 0) {
             // Apply slowness and freeze effects
             int duration = frostLevel * 40; // 2 seconds per level in ticks
-            float slowAmount = frostLevel * 0.05f; // 5% per level
 
             target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, duration, frostLevel - 1));
             target.addEffect(new MobEffectInstance(MobEffects.DIG_SLOWDOWN, duration, frostLevel - 1));
@@ -92,18 +91,6 @@ public class ProjectileEnchantmentEvents {
                 }
             }
         }
-
-        // EXTRACT ENCHANTMENT - Bonus experience
-        if (event.getSource().getEntity() instanceof Player player) {
-            ItemStack weapon = player.getMainHandItem();
-            int extractLevel = weapon.getEnchantmentLevel(ModEnchantments.EXTRACT.get());
-
-            if (extractLevel > 0) {
-                // Increase experience drops by 5% per level
-                int bonusExp = Math.round(event.getDroppedExperience() * (extractLevel * 0.05f));
-                event.setDroppedExperience(event.getDroppedExperience() + bonusExp);
-            }
-        }
     }
 
     // HOMING ENCHANTMENT - Update arrow trajectory
@@ -111,6 +98,9 @@ public class ProjectileEnchantmentEvents {
     public static void onArrowTick(net.minecraftforge.event.TickEvent.PlayerTickEvent event) {
         if (event.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
         Player player = event.player;
+
+        // Only run on server side to avoid client/server casting issues
+        if (player.level().isClientSide) return;
 
         // Find all arrows in the world that belong to this player and have homing
         List<Arrow> arrows = player.level().getEntitiesOfClass(Arrow.class,
@@ -122,8 +112,10 @@ public class ProjectileEnchantmentEvents {
             UUID targetUUID = arrowData.getUUID("HomingTarget");
 
             if (targetUUID != null) {
-                // Find the target entity
-                Entity targetEntity = ((ServerLevel) arrow.level()).getEntity(targetUUID);
+                // Now we know we're on server side, so this cast is safe
+                ServerLevel serverLevel = (ServerLevel) arrow.level();
+                Entity targetEntity = serverLevel.getEntity(targetUUID);
+
                 if (targetEntity instanceof LivingEntity target && target.isAlive()) {
                     // Calculate homing trajectory
                     Vec3 arrowPos = arrow.position();
@@ -141,11 +133,9 @@ public class ProjectileEnchantmentEvents {
                     arrow.setXRot((float)(Mth.atan2(newVelocity.y, newVelocity.horizontalDistance()) * (double)(180F / (float)Math.PI)));
 
                     // Particle effect
-                    if (arrow.level() instanceof ServerLevel serverLevel) {
-                        serverLevel.sendParticles(ParticleTypes.ENCHANT,
-                                arrowPos.x, arrowPos.y, arrowPos.z,
-                                2, 0.1, 0.1, 0.1, 0.02);
-                    }
+                    serverLevel.sendParticles(ParticleTypes.ENCHANT,
+                            arrowPos.x, arrowPos.y, arrowPos.z,
+                            2, 0.1, 0.1, 0.1, 0.02);
                 }
             }
         }

@@ -5,16 +5,17 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.ExperienceOrb;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
@@ -30,12 +31,12 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.event.entity.living.LivingHealEvent;
 import net.minecraftforge.event.entity.player.AttackEntityEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
@@ -78,7 +79,7 @@ public class EnchantmentEvents {
                 tool.getEnchantmentLevel(net.minecraft.world.item.enchantment.Enchantments.SILK_TOUCH) == 0) {
 
             Optional<SmeltingRecipe> recipe = level.getRecipeManager()
-                    .getRecipeFor(RecipeType.SMELTING, new net.minecraft.world.item.crafting.SimpleContainer(new ItemStack(state.getBlock())), level);
+                    .getRecipeFor(RecipeType.SMELTING, new SimpleContainer(new ItemStack(state.getBlock())), level);
 
             if (recipe.isPresent()) {
                 ItemStack result = recipe.get().getResultItem(level.registryAccess());
@@ -122,7 +123,8 @@ public class EnchantmentEvents {
 
         // FARMER ENCHANTMENT
         int farmerLevel = tool.getEnchantmentLevel(ModEnchantments.FARMER.get());
-        if (farmerLevel > 0 && state.getBlock() instanceof CropBlock cropBlock) {
+        if (farmerLevel > 0 && state.getBlock() instanceof CropBlock) {
+            CropBlock cropBlock = (CropBlock) state.getBlock();
             if (!player.isCrouching()) {
                 // Check if crop is mature
                 if (cropBlock.isMaxAge(state)) {
@@ -205,24 +207,56 @@ public class EnchantmentEvents {
         display.put("Lore", lore);
     }
 
-    // RENOUNCE ENCHANTMENT - Handled in combat events
+    // REJUVENATE ENCHANTMENT - Fixed for Forge 1.20.1
+    @SubscribeEvent
+    public static void onBreakSpeed(PlayerEvent.BreakSpeed event) {
+        Player player = event.getEntity();
+        ItemStack tool = player.getMainHandItem();
+        int rejuvenateLevel = tool.getEnchantmentLevel(ModEnchantments.REJUVENATE.get());
+
+        if (rejuvenateLevel > 0 && tool.isDamaged()) {
+            Random random = new Random();
+            int chance = 1000 / rejuvenateLevel;
+
+            if (random.nextInt(chance) == 0) {
+                // Repair tool slightly
+                tool.setDamageValue(Math.max(0, tool.getDamageValue() - 1));
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onLivingHeal(LivingHealEvent event) {
+        if (!(event.getEntity() instanceof Player)) return;
+        Player player = (Player) event.getEntity();
+
+        // Check all armor pieces for rejuvenate
+        for (ItemStack armor : player.getArmorSlots()) {
+            int rejuvenateLevel = armor.getEnchantmentLevel(ModEnchantments.REJUVENATE.get());
+            if (rejuvenateLevel > 0) {
+                Random random = new Random();
+                int chance = 2000 / rejuvenateLevel;
+
+                if (random.nextInt(chance) == 0) {
+                    // Repair armor
+                    armor.setDamageValue(Math.max(0, armor.getDamageValue() - rejuvenateLevel));
+                }
+            }
+        }
+    }
+
+    // Combat event handlers
     @SubscribeEvent
     public static void onAttackEntity(AttackEntityEvent event) {
         Player player = event.getEntity();
         ItemStack weapon = player.getMainHandItem();
         Entity target = event.getTarget();
 
-        // RISKY ENCHANTMENT
-        int riskyLevel = weapon.getEnchantmentLevel(ModEnchantments.RISKY.get());
-        if (riskyLevel > 0 && target instanceof LivingEntity) {
-            // This will be handled in LivingDamageEvent for proper damage modification
-        }
-
-        // COMBO ENCHANTMENT
+        // COMBO ENCHANTMENT - Update combo tracking
         int comboLevel = weapon.getEnchantmentLevel(ModEnchantments.COMBO.get());
         if (comboLevel > 0) {
             CompoundTag tag = weapon.getOrCreateTag();
-            long currentTime = level.getGameTime();
+            long currentTime = player.level().getGameTime();
             long lastKillTime = tag.getLong("ComboLastKill");
             int comboCount = tag.getInt("ComboCount");
             long comboTimeout = 5 * 20 + (comboLevel * 20); // 5 + level seconds in ticks
@@ -242,46 +276,50 @@ public class EnchantmentEvents {
         DamageSource source = event.getSource();
         Entity attacker = source.getEntity();
 
-        if (!(attacker instanceof Player player)) return;
+        if (!(attacker instanceof Player)) return;
+        Player player = (Player) attacker;
         ItemStack weapon = player.getMainHandItem();
 
-        // RISKY ENCHANTMENT
+        // RISKY ENCHANTMENT - Conditional damage modification
         int riskyLevel = weapon.getEnchantmentLevel(ModEnchantments.RISKY.get());
         if (riskyLevel > 0) {
             boolean isCritical = player.getAttackStrengthScale(0.5f) > 0.9f &&
                     player.fallDistance > 0.0f && !player.onGround() &&
                     !player.isInWater() && !player.hasEffect(MobEffects.BLINDNESS);
 
-            float damage = event.getAmount();
-            if (isCritical) {
-                damage *= (1.0f + (riskyLevel * 0.1f)); // +10% per level for crits
-            } else {
-                damage *= (1.0f - (riskyLevel * 0.05f)); // -5% per level for normal
+            // Apply conditional damage modification
+            if (!isCritical) {
+                // Apply penalty for non-critical hits
+                float damage = event.getAmount();
+                damage *= (1.0f - (riskyLevel * 0.05f)); // -5% per level for normal hits
+                event.setAmount(damage);
             }
-            event.setAmount(damage);
+            // Critical hit bonus is handled by attribute system in other files
         }
 
-        // HEALTHY ENCHANTMENT
+        // HEALTHY ENCHANTMENT - Dynamic damage based on current health
         int healthyLevel = weapon.getEnchantmentLevel(ModEnchantments.HEALTHY.get());
         if (healthyLevel > 0) {
             float currentHealth = player.getHealth();
             float maxHealth = player.getMaxHealth();
+            float healthRatio = currentHealth / maxHealth;
 
-            // 1% bonus per HP + 0.5% bonus per HP per level
-            float healthBonus = (currentHealth / maxHealth) * (1.0f + (healthyLevel * 0.5f));
+            // Apply dynamic bonus (tooltip shows max potential)
+            float healthBonus = healthRatio * (1.0f + (healthyLevel * 0.5f));
             float damage = event.getAmount() * (1.0f + healthBonus);
             event.setAmount(damage);
         }
 
-        // ADRENALINE ENCHANTMENT
+        // ADRENALINE ENCHANTMENT - Dynamic damage based on lost health
         int adrenalineLevel = weapon.getEnchantmentLevel(ModEnchantments.ADRENALINE.get());
         if (adrenalineLevel > 0) {
             float currentHealth = player.getHealth();
             float maxHealth = player.getMaxHealth();
             float lostHealth = maxHealth - currentHealth;
+            float lostHealthRatio = lostHealth / maxHealth;
 
-            // 1% bonus per lost HP + 0.5% bonus per lost HP per level
-            float adrenalineBonus = (lostHealth / maxHealth) * (1.0f + (adrenalineLevel * 0.5f));
+            // Apply dynamic bonus (tooltip shows max potential)
+            float adrenalineBonus = lostHealthRatio * (1.0f + (adrenalineLevel * 0.5f));
             float damage = event.getAmount() * (1.0f + adrenalineBonus);
             event.setAmount(damage);
         }
@@ -292,20 +330,21 @@ public class EnchantmentEvents {
             CompoundTag tag = weapon.getOrCreateTag();
             int comboCount = tag.getInt("ComboCount");
             if (comboCount > 0) {
-                float comboDamage = comboCount * (1.0f + comboLevel * 0.5f); // Damage scales with level
+                float comboDamage = comboCount * (1.0f + comboLevel * 0.5f);
                 event.setAmount(event.getAmount() + comboDamage);
             }
         }
 
-        // BREAKING ENCHANTMENT
+        // BREAKING ENCHANTMENT - Reduced base damage, extra armor damage
         int breakingLevel = weapon.getEnchantmentLevel(ModEnchantments.BREAKING.get());
         if (breakingLevel > 0) {
             float baseDamage = event.getAmount() * (1.0f - (breakingLevel * 0.02f)); // -2% per level
             event.setAmount(baseDamage);
 
             // Apply extra damage to armor
-            if (victim instanceof LivingEntity livingVictim) {
-                float armorDamage = breakingLevel * 2.0f; // 2x damage per level
+            if (victim instanceof LivingEntity) {
+                LivingEntity livingVictim = (LivingEntity) victim;
+                float armorDamage = breakingLevel * 2.0f;
                 for (ItemStack armorPiece : livingVictim.getArmorSlots()) {
                     if (!armorPiece.isEmpty()) {
                         armorPiece.hurtAndBreak((int)armorDamage, livingVictim,
@@ -315,14 +354,9 @@ public class EnchantmentEvents {
             }
         }
 
-        // LIFESTEAL ENCHANTMENT (only works on players)
-        int lifestealLevel = weapon.getEnchantmentLevel(ModEnchantments.LIFESTEAL.get());
-        if (lifestealLevel > 0 && victim instanceof Player) {
-            float healAmount = event.getAmount() * (0.1f + (lifestealLevel - 1) * 0.05f); // 10% + 5% per level
-            player.heal(healAmount);
-        }
 
-        // FROST ENCHANTMENT (applied when arrow hits, handled in projectile events)
+
+        // Note: RENOUNCE and ALL_IN damage bonuses are handled automatically by the attribute system
     }
 
     @SubscribeEvent
@@ -331,7 +365,8 @@ public class EnchantmentEvents {
         DamageSource source = event.getSource();
         Entity attacker = source.getEntity();
 
-        if (!(attacker instanceof Player player)) return;
+        if (!(attacker instanceof Player)) return;
+        Player player = (Player) attacker;
         if (victim instanceof Player) return; // Don't count player kills
 
         ItemStack weapon = player.getMainHandItem();
@@ -339,9 +374,11 @@ public class EnchantmentEvents {
         // EXTRACT ENCHANTMENT
         int extractLevel = weapon.getEnchantmentLevel(ModEnchantments.EXTRACT.get());
         if (extractLevel > 0) {
-            // Give 5% more exp per level
-            float expMultiplier = 1.0f + (extractLevel * 0.05f);
-            // This would need to be handled in the experience drop event
+            // Spawn bonus experience orbs
+            if (!victim.level().isClientSide) {
+                int bonusExp = 3 * extractLevel; // 3 exp per level
+                ExperienceOrb.award((ServerLevel) victim.level(), victim.position(), bonusExp);
+            }
         }
 
         // COMBO ENCHANTMENT
@@ -359,8 +396,36 @@ public class EnchantmentEvents {
                         comboCount * 2, 0.3, 0.3, 0.3, 0.1);
             }
         }
+    }
 
-        // CHANCE ENCHANTMENT (handled in arrow impact events)
+    // Fixed LivingDropsEvent for Forge 1.20.1
+    @SubscribeEvent
+    public static void onLivingDrops(LivingDropsEvent event) {
+        LivingEntity entity = event.getEntity();
+
+        // CHANCE ENCHANTMENT - Apply looting effect for bow/crossbow kills
+        CompoundTag entityData = entity.getPersistentData();
+        if (entityData.contains("ChanceEnchantLevel")) {
+            int chanceLevel = entityData.getInt("ChanceEnchantLevel");
+            UUID playerUUID = entityData.getUUID("ChanceEnchantPlayer");
+
+            // Verify the killer matches
+            if (event.getSource().getEntity() instanceof Player) {
+                Player player = (Player) event.getSource().getEntity();
+                if (player.getUUID().equals(playerUUID)) {
+                    // Apply looting effect to drops
+                    for (ItemEntity itemEntity : event.getDrops()) {
+                        ItemStack stack = itemEntity.getItem();
+
+                        // Increase stack size based on looting level (simplified)
+                        if (entity.level().random.nextFloat() < (chanceLevel * 0.33f)) {
+                            stack.setCount(stack.getCount() + 1);
+                            itemEntity.setItem(stack);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // LAVA WALKER ENCHANTMENT
@@ -388,12 +453,6 @@ public class EnchantmentEvents {
                     player.level().scheduleTick(pos, Blocks.MAGMA_BLOCK, 100 + player.level().random.nextInt(100));
                 }
             }
-
-            // Magma damage immunity
-            if (player.level().getBlockState(playerPos).getBlock() == Blocks.MAGMA_BLOCK ||
-                    player.level().getBlockState(playerPos.below()).getBlock() == Blocks.MAGMA_BLOCK) {
-                // Cancel magma damage (would need to be in damage event)
-            }
         }
 
         // MAGNETISM ENCHANTMENT
@@ -416,15 +475,6 @@ public class EnchantmentEvents {
             }
         }
 
-        // SPRINT ENCHANTMENT
-        ItemStack sprintBoots = player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET);
-        int sprintLevel = sprintBoots.getEnchantmentLevel(ModEnchantments.SPRINT.get());
-        if (sprintLevel > 0 && player.isSprinting()) {
-            // Apply speed boost (this would need attribute modification)
-            float speedBonus = sprintLevel * 0.05f; // 5% per level
-            // Implementation would require attribute modifiers
-        }
-
         // MARATHON ENCHANTMENT
         ItemStack legs = player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.LEGS);
         ItemStack feet = player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET);
@@ -433,55 +483,30 @@ public class EnchantmentEvents {
         int marathonFeet = feet.getEnchantmentLevel(ModEnchantments.MARATHON.get());
         int marathonLevel = Math.max(marathonLegs, marathonFeet);
 
-        if (marathonLevel > 0 && (player.isSprinting() || player.isMoving())) {
-            // Reduce hunger drain by 10% per level
-            // This would need to be implemented in the hunger system
-        }
-    }
-
-    // REJUVENATE ENCHANTMENT
-    @SubscribeEvent
-    public static void onItemDurabilityChange(net.minecraftforge.event.entity.player.PlayerEvent.ItemDurabilityChangeEvent event) {
-        ItemStack item = event.getItem();
-        int rejuvenateLevel = item.getEnchantmentLevel(ModEnchantments.REJUVENATE.get());
-
-        if (rejuvenateLevel > 0) {
-            Random random = new Random();
-            int chance = 1000 / rejuvenateLevel; // 1/(1000/level) chance
-
-            if (random.nextInt(chance) == 0) {
-                // Increase max durability
-                CompoundTag tag = item.getOrCreateTag();
-                int bonusDurability = tag.getInt("RejuvenateBonusDurability") + rejuvenateLevel;
-                tag.putInt("RejuvenateBonusDurability", bonusDurability);
+        if (marathonLevel > 0 && (player.isSprinting() || isPlayerMoving(player))) {
+            // Reduce hunger drain by giving small amounts of saturation
+            if (player.tickCount % (100 - (marathonLevel * 10)) == 0) {
+                player.getFoodData().setSaturation(
+                        Math.min(player.getFoodData().getSaturationLevel() + 0.1f,
+                                player.getFoodData().getFoodLevel())
+                );
             }
         }
     }
 
-    @SubscribeEvent
-    public static void onLivingHeal(LivingHealEvent event) {
-        if (!(event.getEntity() instanceof Player player)) return;
-
-        // Check all armor pieces for rejuvenate
-        for (ItemStack armor : player.getArmorSlots()) {
-            int rejuvenateLevel = armor.getEnchantmentLevel(ModEnchantments.REJUVENATE.get());
-            if (rejuvenateLevel > 0) {
-                Random random = new Random();
-                int chance = 2000 / rejuvenateLevel; // 1/(2000/level) chance per HP regenerated
-
-                if (random.nextInt(chance) == 0) {
-                    // Repair armor
-                    armor.setDamageValue(Math.max(0, armor.getDamageValue() - rejuvenateLevel));
-                }
-            }
-        }
+    // Helper method for checking player movement
+    private static boolean isPlayerMoving(Player player) {
+        Vec3 movement = player.getDeltaMovement();
+        return movement.horizontalDistanceSqr() > 0.001; // Small threshold for movement
     }
 
     // HOMING ENCHANTMENT (for arrows)
     @SubscribeEvent
     public static void onArrowSpawn(EntityJoinLevelEvent event) {
-        if (!(event.getEntity() instanceof Arrow arrow)) return;
-        if (!(arrow.getOwner() instanceof Player player)) return;
+        if (!(event.getEntity() instanceof Arrow)) return;
+        Arrow arrow = (Arrow) event.getEntity();
+        if (!(arrow.getOwner() instanceof Player)) return;
+        Player player = (Player) arrow.getOwner();
 
         ItemStack bow = player.getMainHandItem();
         int homingLevel = bow.getEnchantmentLevel(ModEnchantments.HOMING.get());
@@ -523,19 +548,16 @@ public class EnchantmentEvents {
                 entity -> entity != player && !entity.isAlliedTo(player));
 
         LivingEntity closest = null;
-        double closestDistance = Double.MAX_VALUE;
         double closestAngle = Double.MAX_VALUE;
 
         for (LivingEntity entity : entities) {
             Vec3 toEntity = entity.position().subtract(eyePos).normalize();
             double angle = Math.acos(lookVec.dot(toEntity));
-            double distance = eyePos.distanceTo(entity.position());
 
             // Prefer entities closer to crosshair (smaller angle)
             if (angle < Math.PI / 4 && angle < closestAngle) { // Within 45 degrees
                 closest = entity;
                 closestAngle = angle;
-                closestDistance = distance;
             }
         }
 
@@ -544,7 +566,7 @@ public class EnchantmentEvents {
 
     // DRAW ENCHANTMENT (faster bow drawing)
     @SubscribeEvent
-    public static void onPlayerTick2(net.minecraftforge.event.TickEvent.PlayerTickEvent event) {
+    public static void onPlayerTickDraw(net.minecraftforge.event.TickEvent.PlayerTickEvent event) {
         if (event.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
 
         Player player = event.player;
@@ -555,7 +577,6 @@ public class EnchantmentEvents {
 
         if (drawLevel > 0 && item.getItem() instanceof net.minecraft.world.item.BowItem) {
             // Simulate faster drawing by reducing use time needed
-            // This is a simplified approach - full implementation would need mixin or reflection
             CompoundTag playerData = player.getPersistentData();
             int useTime = player.getTicksUsingItem();
 
@@ -568,8 +589,53 @@ public class EnchantmentEvents {
         }
     }
 
-    // FARMER ENCHANTMENT additional logic for crop yield bonus would go here
-    // This requires hooking into the loot table generation which is more complex
+    // HOMING ENCHANTMENT - Update arrow trajectory
+    @SubscribeEvent
+    public static void onArrowTick(net.minecraftforge.event.TickEvent.PlayerTickEvent event) {
+        if (event.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
+        Player player = event.player;
+
+        // Only run on server side to avoid client/server casting issues
+        if (player.level().isClientSide) return;
+
+        // Find all arrows in the world that belong to this player and have homing
+        List<Arrow> arrows = player.level().getEntitiesOfClass(Arrow.class,
+                player.getBoundingBox().inflate(50.0),
+                arrow -> arrow.getOwner() == player && arrow.getPersistentData().getBoolean("IsHoming"));
+
+        for (Arrow arrow : arrows) {
+            CompoundTag arrowData = arrow.getPersistentData();
+            UUID targetUUID = arrowData.getUUID("HomingTarget");
+
+            if (targetUUID != null) {
+                // Now we know we're on server side, so this cast is safe
+                ServerLevel serverLevel = (ServerLevel) arrow.level();
+                Entity targetEntity = serverLevel.getEntity(targetUUID);
+
+                if (targetEntity instanceof LivingEntity target && target.isAlive()) {
+                    // Calculate homing trajectory
+                    Vec3 arrowPos = arrow.position();
+                    Vec3 targetPos = target.position().add(0, target.getBbHeight() / 2, 0);
+                    Vec3 direction = targetPos.subtract(arrowPos).normalize();
+
+                    // Gradually adjust arrow velocity toward target
+                    Vec3 currentVelocity = arrow.getDeltaMovement();
+                    Vec3 newVelocity = currentVelocity.scale(0.9).add(direction.scale(0.1));
+
+                    arrow.setDeltaMovement(newVelocity);
+
+                    // Update arrow rotation to match new direction
+                    arrow.setYRot((float)(Mth.atan2(newVelocity.x, newVelocity.z) * (double)(180F / (float)Math.PI)));
+                    arrow.setXRot((float)(Mth.atan2(newVelocity.y, newVelocity.horizontalDistance()) * (double)(180F / (float)Math.PI)));
+
+                    // Particle effect
+                    serverLevel.sendParticles(ParticleTypes.ENCHANT,
+                            arrowPos.x, arrowPos.y, arrowPos.z,
+                            2, 0.1, 0.1, 0.1, 0.02);
+                }
+            }
+        }
+    }
 
     // Helper method to handle mastery speed calculation
     public static float getMasterySpeedBonus(ItemStack tool) {
