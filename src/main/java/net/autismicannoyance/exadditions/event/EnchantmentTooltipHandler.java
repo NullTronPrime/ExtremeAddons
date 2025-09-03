@@ -4,36 +4,155 @@ import net.autismicannoyance.exadditions.enchantment.ModEnchantments;
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraftforge.event.entity.player.ItemTooltipEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.UUID;
 
 @Mod.EventBusSubscriber(modid = "exadditions")
 public class EnchantmentTooltipHandler {
 
-    @SubscribeEvent
+    // UUID for our custom attribute modifiers to avoid conflicts
+    private static final UUID ENCHANT_DAMAGE_UUID = UUID.fromString("CB3F55D3-645C-4F38-A497-9C13A33DB5CF");
+
+    @SubscribeEvent(priority = EventPriority.HIGH)
     public static void onItemTooltip(ItemTooltipEvent event) {
         ItemStack stack = event.getItemStack();
         Player player = event.getEntity();
+        List<Component> tooltip = event.getToolTip();
 
-        // Add tooltips for each custom enchantment
+        // Modify existing damage tooltip lines instead of adding new ones
+        modifyDamageTooltip(stack, tooltip, player);
+
+        // Add custom enchantment tooltips (only for enchantments that don't affect damage)
+        addNonDamageEnchantmentTooltips(stack, event);
+    }
+
+    private static void modifyDamageTooltip(ItemStack stack, List<Component> tooltip, Player player) {
+        // Calculate total damage bonus from our enchantments
+        float totalDamageBonus = calculateTotalDamageBonus(stack, player);
+
+        if (totalDamageBonus == 0) return;
+
+        // Find and modify the damage line in the tooltip
+        for (int i = 0; i < tooltip.size(); i++) {
+            Component line = tooltip.get(i);
+            String text = line.getString();
+
+            // Look for the damage line (contains "Attack Damage" and a number)
+            if (text.contains("Attack Damage") && text.matches(".*\\d+.*")) {
+                // Extract the base damage value
+                String[] parts = text.split(" ");
+                for (String part : parts) {
+                    try {
+                        float baseDamage = Float.parseFloat(part);
+                        float newDamage = baseDamage + totalDamageBonus;
+
+                        // Replace the line with updated damage
+                        String newText = text.replace(part, String.format("%.1f", newDamage));
+                        tooltip.set(i, Component.literal(newText).withStyle(line.getStyle()));
+
+                        // Add a line showing the bonus if significant
+                        if (totalDamageBonus >= 0.1f) {
+                            tooltip.add(i + 1, Component.literal(" " + String.format("+%.1f", totalDamageBonus) + " Attack Damage from Enchantments")
+                                    .withStyle(ChatFormatting.BLUE));
+                        }
+                        return;
+                    } catch (NumberFormatException e) {
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+
+    private static float calculateTotalDamageBonus(ItemStack stack, Player player) {
+        float totalBonus = 0.0f;
+
+        // RENOUNCE ENCHANTMENT - Flat +5 damage
+        int renounceLevel = stack.getEnchantmentLevel(ModEnchantments.RENOUNCE.get());
+        if (renounceLevel > 0) {
+            totalBonus += 5.0f;
+        }
+
+        // ALL IN ENCHANTMENT - 200% damage multiplier (shown as bonus)
+        int allInLevel = stack.getEnchantmentLevel(ModEnchantments.ALL_IN.get());
+        if (allInLevel > 0) {
+            // This is a multiplier, so we need to calculate it based on base damage
+            // For tooltip purposes, we'll show the potential bonus
+            totalBonus += getBaseDamage(stack) * 2.0f; // 200% of base damage
+        }
+
+        // HEALTHY ENCHANTMENT - Dynamic based on current health
+        int healthyLevel = stack.getEnchantmentLevel(ModEnchantments.HEALTHY.get());
+        if (healthyLevel > 0 && player != null) {
+            float currentHealth = player.getHealth();
+            float maxHealth = player.getMaxHealth();
+            float healthRatio = currentHealth / maxHealth;
+            float healthBonus = healthRatio * (healthyLevel * 0.5f) * getBaseDamage(stack);
+            totalBonus += healthBonus;
+        }
+
+        // ADRENALINE ENCHANTMENT - Dynamic based on lost health
+        int adrenalineLevel = stack.getEnchantmentLevel(ModEnchantments.ADRENALINE.get());
+        if (adrenalineLevel > 0 && player != null) {
+            float currentHealth = player.getHealth();
+            float maxHealth = player.getMaxHealth();
+            float lostHealth = maxHealth - currentHealth;
+            float lostHealthRatio = lostHealth / maxHealth;
+            float adrenalineBonus = lostHealthRatio * (adrenalineLevel * 0.5f) * getBaseDamage(stack);
+            totalBonus += adrenalineBonus;
+        }
+
+        // COMBO ENCHANTMENT - Based on current combo
+        int comboLevel = stack.getEnchantmentLevel(ModEnchantments.COMBO.get());
+        if (comboLevel > 0) {
+            CompoundTag tag = stack.getTag();
+            if (tag != null) {
+                int comboCount = tag.getInt("ComboCount");
+                float comboDamage = comboCount * (1.0f + comboLevel * 0.5f);
+                totalBonus += comboDamage;
+            }
+        }
+
+        return totalBonus;
+    }
+
+    private static float getBaseDamage(ItemStack stack) {
+        // Get the base attack damage from the item's attributes
+        Collection<AttributeModifier> modifiers = stack.getAttributeModifiers(EquipmentSlot.MAINHAND)
+                .get(Attributes.ATTACK_DAMAGE);
+
+        float baseDamage = 1.0f; // Default punch damage
+        for (AttributeModifier modifier : modifiers) {
+            if (modifier.getOperation() == AttributeModifier.Operation.ADDITION) {
+                baseDamage += modifier.getAmount();
+            }
+        }
+        return baseDamage;
+    }
+
+    private static void addNonDamageEnchantmentTooltips(ItemStack stack, ItemTooltipEvent event) {
+        // Only add tooltips for enchantments that don't affect damage directly
         addVeinMineTooltip(stack, event);
-        addRenounceTooltip(stack, event);
         addMasteryTooltip(stack, event);
-        addRiskyTooltip(stack, event);
         addExtractTooltip(stack, event);
-        addHealthyTooltip(stack, event, player);
         addLavaWalkerTooltip(stack, event);
         addMagnetismTooltip(stack, event);
-        addComboTooltip(stack, event);
         addBreakingTooltip(stack, event);
         addHomingTooltip(stack, event);
         addLifestealTooltip(stack, event);
         addFarmerTooltip(stack, event);
-        addAllInTooltip(stack, event);
-        addAdrenalineTooltip(stack, event, player);
         addChanceTooltip(stack, event);
         addSmeltingTooltip(stack, event);
         addSprintTooltip(stack, event);
@@ -42,22 +161,15 @@ public class EnchantmentTooltipHandler {
         addMarathonTooltip(stack, event);
         addDrawTooltip(stack, event);
         addRejuvenateTooltip(stack, event);
+        addRiskyTooltip(stack, event);
     }
 
+    // Keep only the non-damage affecting enchantment tooltips
     private static void addVeinMineTooltip(ItemStack stack, ItemTooltipEvent event) {
         int level = stack.getEnchantmentLevel(ModEnchantments.VEIN_MINE.get());
         if (level > 0) {
-            event.getToolTip().add(Component.literal("Vein Mine I").withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Mines entire ore veins").withStyle(ChatFormatting.DARK_GREEN));
-        }
-    }
-
-    private static void addRenounceTooltip(ItemStack stack, ItemTooltipEvent event) {
-        int level = stack.getEnchantmentLevel(ModEnchantments.RENOUNCE.get());
-        if (level > 0) {
-            event.getToolTip().add(Component.literal("Renounce I").withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" +5 Attack Damage").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Removes log mining speed bonus").withStyle(ChatFormatting.RED));
+            event.getToolTip().add(Component.literal("§7Vein Mine I"));
+            event.getToolTip().add(Component.literal("§2 Mines entire ore veins"));
         }
     }
 
@@ -68,9 +180,9 @@ public class EnchantmentTooltipHandler {
             int blocksMined = tag != null ? tag.getInt("MasteryBlocksMined") : 0;
             double bonus = blocksMined >= 10 ? Math.log10(blocksMined) * 100 : 0;
 
-            event.getToolTip().add(Component.literal("Mastery I").withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Blocks Mined: " + blocksMined).withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" +" + String.format("%.1f", bonus) + "% Mining Speed").withStyle(ChatFormatting.DARK_GREEN));
+            event.getToolTip().add(Component.literal("§7Mastery I"));
+            event.getToolTip().add(Component.literal("§2 Blocks Mined: " + blocksMined));
+            event.getToolTip().add(Component.literal("§2 +" + String.format("%.1f", bonus) + "% Mining Speed"));
         }
     }
 
@@ -80,9 +192,9 @@ public class EnchantmentTooltipHandler {
             int normalPenalty = level * 5;
             int criticalBonus = level * 10;
 
-            event.getToolTip().add(Component.literal("Risky " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" -" + normalPenalty + "% Normal Attack Damage").withStyle(ChatFormatting.RED));
-            event.getToolTip().add(Component.literal(" +" + criticalBonus + "% Critical Attack Damage").withStyle(ChatFormatting.DARK_GREEN));
+            event.getToolTip().add(Component.literal("§7Risky " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§c -" + normalPenalty + "% Normal Attack Damage"));
+            event.getToolTip().add(Component.literal("§2 +" + criticalBonus + "% Critical Attack Damage"));
         }
     }
 
@@ -90,38 +202,17 @@ public class EnchantmentTooltipHandler {
         int level = stack.getEnchantmentLevel(ModEnchantments.EXTRACT.get());
         if (level > 0) {
             int bonusExp = level * 5;
-
-            event.getToolTip().add(Component.literal("Extract " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" +" + bonusExp + "% Experience from mobs").withStyle(ChatFormatting.DARK_GREEN));
-        }
-    }
-
-    private static void addHealthyTooltip(ItemStack stack, ItemTooltipEvent event, Player player) {
-        int level = stack.getEnchantmentLevel(ModEnchantments.HEALTHY.get());
-        if (level > 0) {
-            // Show maximum potential damage bonus
-            float maxHealthBonus = 20.0f * (1.0f + level * 0.5f); // Assuming 20 max health
-
-            event.getToolTip().add(Component.literal("Healthy " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Up to +" + String.format("%.0f", maxHealthBonus) + "% Attack Damage").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Based on current health").withStyle(ChatFormatting.DARK_GRAY));
-
-            // Show current bonus if player is available
-            if (player != null) {
-                float currentHealth = player.getHealth();
-                float maxHealth = player.getMaxHealth();
-                float currentBonus = (currentHealth / maxHealth) * (1.0f + level * 0.5f) * 100;
-                event.getToolTip().add(Component.literal(" Current: +" + String.format("%.1f", currentBonus) + "% damage").withStyle(ChatFormatting.BLUE));
-            }
+            event.getToolTip().add(Component.literal("§7Extract " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§2 +" + bonusExp + "% Experience from mobs"));
         }
     }
 
     private static void addLavaWalkerTooltip(ItemStack stack, ItemTooltipEvent event) {
         int level = stack.getEnchantmentLevel(ModEnchantments.LAVA_WALKER.get());
         if (level > 0) {
-            event.getToolTip().add(Component.literal("Lava Walker " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" " + level + " block radius lava walking").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Immunity to magma damage").withStyle(ChatFormatting.DARK_GREEN));
+            event.getToolTip().add(Component.literal("§7Lava Walker " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§2 " + level + " block radius lava walking"));
+            event.getToolTip().add(Component.literal("§2 Immunity to magma damage"));
         }
     }
 
@@ -129,52 +220,27 @@ public class EnchantmentTooltipHandler {
         int level = stack.getEnchantmentLevel(ModEnchantments.MAGNETISM.get());
         if (level > 0) {
             int radius = 3 + level * 2;
-
-            event.getToolTip().add(Component.literal("Magnetism " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Pulls items from " + radius + " blocks").withStyle(ChatFormatting.DARK_GREEN));
-        }
-    }
-
-    private static void addComboTooltip(ItemStack stack, ItemTooltipEvent event) {
-        int level = stack.getEnchantmentLevel(ModEnchantments.COMBO.get());
-        if (level > 0) {
-            int timer = 5 + level;
-            float damagePerMob = 1.0f + level * 0.5f;
-
-            event.getToolTip().add(Component.literal("Combo " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" " + timer + "s timer between kills").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" +" + String.format("%.1f", damagePerMob) + " damage per mob in combo").withStyle(ChatFormatting.DARK_GREEN));
-
-            // Show current combo if available
-            CompoundTag tag = stack.getTag();
-            if (tag != null) {
-                int comboCount = tag.getInt("ComboCount");
-                if (comboCount > 0) {
-                    float totalBonus = comboCount * damagePerMob;
-                    event.getToolTip().add(Component.literal(" Current Combo: " + comboCount + " (+" + String.format("%.1f", totalBonus) + " damage)").withStyle(ChatFormatting.GOLD));
-                }
-            }
+            event.getToolTip().add(Component.literal("§7Magnetism " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§2 Pulls items from " + radius + " blocks"));
         }
     }
 
     private static void addBreakingTooltip(ItemStack stack, ItemTooltipEvent event) {
         int level = stack.getEnchantmentLevel(ModEnchantments.BREAKING.get());
         if (level > 0) {
-            int damagePenalty = 10 + (level - 1) * 2;
             int armorDamage = level * 200;
-
-            event.getToolTip().add(Component.literal("Breaking " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" -" + damagePenalty + "% Attack Damage").withStyle(ChatFormatting.RED));
-            event.getToolTip().add(Component.literal(" +" + armorDamage + "% Damage to Armor").withStyle(ChatFormatting.DARK_GREEN));
+            event.getToolTip().add(Component.literal("§7Breaking " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§2 +" + armorDamage + "% Damage to Armor"));
+            event.getToolTip().add(Component.literal("§8 Slightly reduces base damage"));
         }
     }
 
     private static void addHomingTooltip(ItemStack stack, ItemTooltipEvent event) {
         int level = stack.getEnchantmentLevel(ModEnchantments.HOMING.get());
         if (level > 0) {
-            event.getToolTip().add(Component.literal("Homing I").withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Arrows home towards enemies").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Works with Multishot").withStyle(ChatFormatting.DARK_GREEN));
+            event.getToolTip().add(Component.literal("§7Homing I"));
+            event.getToolTip().add(Component.literal("§2 Arrows home towards enemies"));
+            event.getToolTip().add(Component.literal("§2 Works with Multishot"));
         }
     }
 
@@ -182,70 +248,39 @@ public class EnchantmentTooltipHandler {
         int level = stack.getEnchantmentLevel(ModEnchantments.LIFESTEAL.get());
         if (level > 0) {
             int healPercent = 10 + (level - 1) * 5;
-
-            event.getToolTip().add(Component.literal("Lifesteal " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Heal " + healPercent + "% of damage dealt").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Only works against players").withStyle(ChatFormatting.DARK_GRAY));
+            event.getToolTip().add(Component.literal("§7Lifesteal " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§2 Heal " + healPercent + "% of damage dealt"));
+            event.getToolTip().add(Component.literal("§8 Only works against players"));
         }
     }
 
     private static void addFarmerTooltip(ItemStack stack, ItemTooltipEvent event) {
         int level = stack.getEnchantmentLevel(ModEnchantments.FARMER.get());
         if (level > 0) {
-            event.getToolTip().add(Component.literal("Farmer I").withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Auto-replants crops").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Prevents breaking immature crops").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" +30% crop yield").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Sneak to disable").withStyle(ChatFormatting.DARK_GRAY));
-        }
-    }
-
-    private static void addAllInTooltip(ItemStack stack, ItemTooltipEvent event) {
-        int level = stack.getEnchantmentLevel(ModEnchantments.ALL_IN.get());
-        if (level > 0) {
-            event.getToolTip().add(Component.literal("All In I").withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" +200% Attack Damage").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Cannot be combined with other enchantments").withStyle(ChatFormatting.RED));
-        }
-    }
-
-    private static void addAdrenalineTooltip(ItemStack stack, ItemTooltipEvent event, Player player) {
-        int level = stack.getEnchantmentLevel(ModEnchantments.ADRENALINE.get());
-        if (level > 0) {
-            // Show maximum potential damage bonus
-            float maxHealthBonus = 20.0f * (1.0f + level * 0.5f); // Assuming 20 max health
-
-            event.getToolTip().add(Component.literal("Adrenaline " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Up to +" + String.format("%.0f", maxHealthBonus) + "% Attack Damage").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Based on lost health").withStyle(ChatFormatting.DARK_GRAY));
-
-            // Show current bonus if player is available
-            if (player != null) {
-                float currentHealth = player.getHealth();
-                float maxHealth = player.getMaxHealth();
-                float lostHealth = maxHealth - currentHealth;
-                float currentBonus = (lostHealth / maxHealth) * (1.0f + level * 0.5f) * 100;
-                event.getToolTip().add(Component.literal(" Current: +" + String.format("%.1f", currentBonus) + "% damage").withStyle(ChatFormatting.BLUE));
-            }
+            event.getToolTip().add(Component.literal("§7Farmer I"));
+            event.getToolTip().add(Component.literal("§2 Auto-replants crops"));
+            event.getToolTip().add(Component.literal("§2 Prevents breaking immature crops"));
+            event.getToolTip().add(Component.literal("§2 +30% crop yield"));
+            event.getToolTip().add(Component.literal("§8 Sneak to disable"));
         }
     }
 
     private static void addChanceTooltip(ItemStack stack, ItemTooltipEvent event) {
         int level = stack.getEnchantmentLevel(ModEnchantments.CHANCE.get());
         if (level > 0) {
-            event.getToolTip().add(Component.literal("Chance " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Looting effect for bows and crossbows").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Increases mob drop rates").withStyle(ChatFormatting.DARK_GREEN));
+            event.getToolTip().add(Component.literal("§7Chance " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§2 Looting effect for bows and crossbows"));
+            event.getToolTip().add(Component.literal("§2 Increases mob drop rates"));
         }
     }
 
     private static void addSmeltingTooltip(ItemStack stack, ItemTooltipEvent event) {
         int level = stack.getEnchantmentLevel(ModEnchantments.SMELTING.get());
         if (level > 0) {
-            event.getToolTip().add(Component.literal("Smelting I").withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Auto-smelts mined blocks").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Logs → Charcoal, Ores → Ingots").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Incompatible with Fortune/Silk Touch").withStyle(ChatFormatting.DARK_GRAY));
+            event.getToolTip().add(Component.literal("§7Smelting I"));
+            event.getToolTip().add(Component.literal("§2 Auto-smelts mined blocks"));
+            event.getToolTip().add(Component.literal("§2 Logs → Charcoal, Ores → Ingots"));
+            event.getToolTip().add(Component.literal("§8 Incompatible with Fortune/Silk Touch"));
         }
     }
 
@@ -253,10 +288,9 @@ public class EnchantmentTooltipHandler {
         int level = stack.getEnchantmentLevel(ModEnchantments.SPRINT.get());
         if (level > 0) {
             int speedBonus = level * 5;
-
-            event.getToolTip().add(Component.literal("Sprint " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" +" + speedBonus + "% Sprint Speed").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Does not affect walking speed").withStyle(ChatFormatting.DARK_GRAY));
+            event.getToolTip().add(Component.literal("§7Sprint " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§2 +" + speedBonus + "% Sprint Speed"));
+            event.getToolTip().add(Component.literal("§8 Does not affect walking speed"));
         }
     }
 
@@ -265,20 +299,19 @@ public class EnchantmentTooltipHandler {
         if (level > 0) {
             int slowPercent = level * 5;
             int freezeTime = level * 2;
-
-            event.getToolTip().add(Component.literal("Frost " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" -" + slowPercent + "% Enemy Movement & Attack Speed").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Freezes for " + freezeTime + " seconds").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Incompatible with Flame").withStyle(ChatFormatting.DARK_GRAY));
+            event.getToolTip().add(Component.literal("§7Frost " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§2 -" + slowPercent + "% Enemy Movement & Attack Speed"));
+            event.getToolTip().add(Component.literal("§2 Freezes for " + freezeTime + " seconds"));
+            event.getToolTip().add(Component.literal("§8 Incompatible with Flame"));
         }
     }
 
     private static void addSiphonTooltip(ItemStack stack, ItemTooltipEvent event) {
         int level = stack.getEnchantmentLevel(ModEnchantments.SIPHON.get());
         if (level > 0) {
-            event.getToolTip().add(Component.literal("Siphon I").withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Drops go directly to inventory").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Works with all tool enchantments").withStyle(ChatFormatting.DARK_GREEN));
+            event.getToolTip().add(Component.literal("§7Siphon I"));
+            event.getToolTip().add(Component.literal("§2 Drops go directly to inventory"));
+            event.getToolTip().add(Component.literal("§2 Works with all tool enchantments"));
         }
     }
 
@@ -286,10 +319,9 @@ public class EnchantmentTooltipHandler {
         int level = stack.getEnchantmentLevel(ModEnchantments.MARATHON.get());
         if (level > 0) {
             int hungerReduction = level * 10;
-
-            event.getToolTip().add(Component.literal("Marathon " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" -" + hungerReduction + "% Hunger Drain").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" While walking or sprinting").withStyle(ChatFormatting.DARK_GRAY));
+            event.getToolTip().add(Component.literal("§7Marathon " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§2 -" + hungerReduction + "% Hunger Drain"));
+            event.getToolTip().add(Component.literal("§8 While walking or sprinting"));
         }
     }
 
@@ -297,20 +329,19 @@ public class EnchantmentTooltipHandler {
         int level = stack.getEnchantmentLevel(ModEnchantments.DRAW.get());
         if (level > 0) {
             int speedBonus = level * 7;
-
-            event.getToolTip().add(Component.literal("Draw " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" -" + speedBonus + "% Bow Draw Time").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Shoot arrows faster").withStyle(ChatFormatting.DARK_GREEN));
+            event.getToolTip().add(Component.literal("§7Draw " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§2 -" + speedBonus + "% Bow Draw Time"));
+            event.getToolTip().add(Component.literal("§2 Shoot arrows faster"));
         }
     }
 
     private static void addRejuvenateTooltip(ItemStack stack, ItemTooltipEvent event) {
         int level = stack.getEnchantmentLevel(ModEnchantments.REJUVENATE.get());
         if (level > 0) {
-            event.getToolTip().add(Component.literal("Rejuvenate " + getRomanNumeral(level)).withStyle(ChatFormatting.GRAY));
-            event.getToolTip().add(Component.literal(" Chance to repair on use").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Chance to increase max durability").withStyle(ChatFormatting.DARK_GREEN));
-            event.getToolTip().add(Component.literal(" Incompatible with Mending").withStyle(ChatFormatting.DARK_GRAY));
+            event.getToolTip().add(Component.literal("§7Rejuvenate " + getRomanNumeral(level)));
+            event.getToolTip().add(Component.literal("§2 Chance to repair on use"));
+            event.getToolTip().add(Component.literal("§2 Chance to increase max durability"));
+            event.getToolTip().add(Component.literal("§8 Incompatible with Mending"));
         }
     }
 
