@@ -1,36 +1,34 @@
 {
   "item.exadditions.sapphire": "Sapphire",
   "item.exadditions.raw_sapphire": "Raw Sapphire",
-  "item.exadditions.metal_detector": "Metal detector",
-  "item.exadditions.metal_detector_v2": "Metal detector MKII",
-  "item.exadditions.fire_resist_charm": "Fire charm",
-  "item.exadditions.reflect_charm": "Charm of reflection",
+  "item.exadditions.metal_detector": "Metal Detector",
+  "item.exadditions.metal_detector_v2": "Metal Detector MKII",
+  "item.exadditions.fire_resist_charm": "Fire Charm",
+  "item.exadditions.reflect_charm": "Charm of Reflection",
   "item.exadditions.momentum_battery": "Battery",
-  "item.exadditions.eye_of_sauron": "Eye of sauron",
-  "item.exadditions.blast_resist_charm": "Blast charm",
-  "item.exadditions.death_charm": "Death charm",
-  "item.exadditions.blood_charm": "Blood charm",
-  "item.exadditions.chronos_implement": "Chronos implement",
-
+  "item.exadditions.eye_of_sauron": "Eye of Sauron",
+  "item.exadditions.blast_resist_charm": "Blast Charm",
+  "item.exadditions.death_charm": "Death Charm",
+  "item.exadditions.blood_charm": "Blood Charm",
+  "item.exadditions.chronos_implement": "Chronos Implement",
 
   "item.exadditions.strawberry": "Strawberry",
-  "item.exadditions.pine_cone": "Pine cone",
+  "item.exadditions.pine_cone": "Pine Cone",
   "item.exadditions.chaos_fruit": "Chaos Fruit",
 
-  "block.exadditions.sapphire_block" : "Block of sapphire",
-  "block.exadditions.raw_sapphire_block" : "Block of raw sapphire",
-  "block.exadditions.sound_block" : "Sound block",
+  "block.exadditions.sapphire_block": "Block of Sapphire",
+  "block.exadditions.raw_sapphire_block": "Block of Raw Sapphire",
+  "block.exadditions.sound_block": "Sound Block",
 
   "block.exadditions.sapphire_ore": "Sapphire Ore",
   "block.exadditions.deepslate_sapphire_ore": "Deepslate Sapphire Ore",
   "block.exadditions.end_stone_sapphire_ore": "Endstone Sapphire Ore",
   "block.exadditions.nether_sapphire_ore": "Nether Sapphire Ore",
 
-
-  "creativetab.additions_tab":"Additions",
+  "creativetab.additions_tab": "Additions",
 
   "effect.exadditions.enderosis": "Enderosis",
-  "effect.exadditions.enderosis.description": "Teleports you away from projectiles and water contact, but damages you when touching water",
+  "effect.exadditions.enderosis.description": "Teleports you away from projectiles and water, but harms you when touching water.",
 
   "item.minecraft.potion.effect.enderosis": "Potion of Enderosis",
   "item.minecraft.splash_potion.effect.enderosis": "Splash Potion of Enderosis",
@@ -44,7 +42,77 @@
   "item.minecraft.splash_potion.effect.strong_enderosis": "Splash Potion of Enderosis",
   "item.minecraft.lingering_potion.effect.strong_enderosis": "Lingering Potion of Enderosis",
 
+  "enchantment.exadditions.vein_mine": "Vein Mine",
+  "enchantment.exadditions.vein_mine.desc": "Mines an entire vein of ore at once.",
+
+  "enchantment.exadditions.renounce": "Renounce",
+  "enchantment.exadditions.renounce.desc": "Adds +5 damage to axes but removes their bonus speed against logs.",
+
+  "enchantment.exadditions.mastery": "Mastery",
+  "enchantment.exadditions.mastery.desc": "Increases mining speed the more blocks you mine with the tool.",
+
+  "enchantment.exadditions.risky": "Risky",
+  "enchantment.exadditions.risky.desc": "Deals less damage on normal hits but more on critical hits.",
+
+  "enchantment.exadditions.extract": "Extract",
+  "enchantment.exadditions.extract.desc": "Gain extra experience from killing mobs.",
+
+  "enchantment.exadditions.healthy": "Healthy",
+  "enchantment.exadditions.healthy.desc": "Deal more damage the healthier you are.",
+
+  "enchantment.exadditions.lava_walker": "Lava Walker",
+  "enchantment.exadditions.lava_walker.desc": "Turns lava beneath you into magma blocks temporarily.",
+
+  "enchantment.exadditions.magnetism": "Magnetism",
+  "enchantment.exadditions.magnetism.desc": "Pulls in nearby dropped items toward you.",
+
+  "enchantment.exadditions.combo": "Combo",
+  "enchantment.exadditions.combo.desc": "Build combos on consecutive kills for bonus damage.",
+
+  "enchantment.exadditions.breaking": "Breaking",
+  "enchantment.exadditions.breaking.desc": "Deals reduced base damage but massively damages enemy armor.",
+
+  "enchantment.exadditions.homing": "Homing",
+  "enchantment.exadditions.homing.desc": "Arrows and bolts home in on enemies near your aim.",
+
+  "enchantment.exadditions.lifesteal": "Lifesteal",
+  "enchantment.exadditions.lifesteal.desc": "Heal a portion of the damage you deal.",
+
+  "enchantment.exadditions.farmer": "Farmer",
+  "enchantment.exadditions.farmer.desc": "Replants crops automatically and prevents breaking baby plants.",
+
+  "enchantment.exadditions.all_in": "All In",
+  "enchantment.exadditions.all_in.desc": "Exclusive enchantment. Triples base sword damage but prevents other enchantments.",
+
+  "enchantment.exadditions.adrenaline": "Adrenaline",
+  "enchantment.exadditions.adrenaline.desc": "Deal more damage the lower your health is.",
+
+  "enchantment.exadditions.chance": "Chance",
+  "enchantment.exadditions.chance.desc": "Applies looting effects to bows and crossbows.",
+
+  "enchantment.exadditions.smelting": "Smelting",
+  "enchantment.exadditions.smelting.desc": "Automatically smelts blocks you break.",
+
+  "enchantment.exadditions.sprint": "Sprint",
+  "enchantment.exadditions.sprint.desc": "Increases sprinting speed.",
+
+  "enchantment.exadditions.frost": "Frost",
+  "enchantment.exadditions.frost.desc": "Arrows slow and freeze targets.",
+
+  "enchantment.exadditions.siphon": "Siphon",
+  "enchantment.exadditions.siphon.desc": "Drops from blocks go directly into your inventory.",
+
+  "enchantment.exadditions.marathon": "Marathon",
+  "enchantment.exadditions.marathon.desc": "Reduces hunger loss while moving.",
+
+  "enchantment.exadditions.draw": "Draw",
+  "enchantment.exadditions.draw.desc": "Bows draw back faster.",
+
+  "enchantment.exadditions.rejuvenate": "Rejuvenate",
+  "enchantment.exadditions.rejuvenate.desc": "Has a chance to restore durability over time or when healing.",
 
   "enchantment.exadditions.ring_capacity": "Ring Capacity",
-  "enchantment.exadditions.ring_capacity.desc": "Increases the maximum number of protective rings that can be generated."
+  "enchantment.exadditions.ring_capacity.desc": "Increases the maximum number of protective rings that can be generated.",
+  "item.exadditions.super_bundle": "Super Bundle",
+  "item.exadditions.boundless_bundle": "Boundless Bundle"
 }

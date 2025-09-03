@@ -77,6 +77,11 @@ public class ModItems {
                     .fireResistant()
             ));
 
+    public static final RegistryObject<Item> SUPER_BUNDLE = ITEMS.register("super_bundle",
+            () -> new SuperBundleItem(new Item.Properties().stacksTo(1).fireResistant()));
+    public static final RegistryObject<Item> BOUNDLESS_BUNDLE = ITEMS.register("boundless_bundle",
+            () -> new BoundlessBundleItem(new Item.Properties().stacksTo(1).fireResistant()));
+
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);
     }

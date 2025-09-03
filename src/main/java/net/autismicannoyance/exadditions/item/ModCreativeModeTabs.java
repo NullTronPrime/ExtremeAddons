@@ -40,6 +40,8 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModBlocks.SOUND_BLOCK.get());
                         pOutput.accept(ModItems.CHRONOS_IMPLEMENT.get());
                         pOutput.accept(ModItems.CHAOS_FRUIT.get());
+                        pOutput.accept(ModItems.SUPER_BUNDLE.get());
+                        pOutput.accept(ModItems.BOUNDLESS_BUNDLE.get());
 
                     })
                     .build());
