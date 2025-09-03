@@ -31,6 +31,7 @@ public class MarathonEnchantment extends Enchantment {
     public boolean canEnchant(ItemStack stack) {
         if (!(stack.getItem() instanceof ArmorItem armorItem)) return false;
         EquipmentSlot slot = armorItem.getEquipmentSlot();
+        // Only works on boots and leggings as specified
         return slot == EquipmentSlot.FEET || slot == EquipmentSlot.LEGS;
     }
 

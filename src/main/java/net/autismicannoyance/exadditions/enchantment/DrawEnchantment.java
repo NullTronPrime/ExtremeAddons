@@ -28,6 +28,7 @@ public class DrawEnchantment extends Enchantment {
 
     @Override
     public boolean canEnchant(ItemStack stack) {
+        // Only works on bows
         return stack.getItem() instanceof BowItem;
     }
 

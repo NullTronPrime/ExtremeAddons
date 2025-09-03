@@ -29,6 +29,7 @@ public class FrostEnchantment extends Enchantment {
 
     @Override
     public boolean canEnchant(ItemStack stack) {
+        // Only works on bows, not crossbows
         return stack.getItem() instanceof BowItem;
     }
 
@@ -39,6 +40,7 @@ public class FrostEnchantment extends Enchantment {
 
     @Override
     public boolean checkCompatibility(Enchantment other) {
+        // Incompatible with Flame enchantment
         return other != Enchantments.FLAMING_ARROWS && super.checkCompatibility(other);
     }
 

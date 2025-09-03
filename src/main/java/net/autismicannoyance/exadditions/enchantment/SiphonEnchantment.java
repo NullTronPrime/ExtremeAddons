@@ -28,6 +28,7 @@ public class SiphonEnchantment extends Enchantment {
 
     @Override
     public boolean canEnchant(ItemStack stack) {
+        // Works on any tool (pickaxe, axe, shovel, hoe, sword)
         return stack.getItem() instanceof TieredItem;
     }
 

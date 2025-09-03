@@ -24,7 +24,7 @@ public class ChanceEnchantment extends Enchantment {
 
     @Override
     public int getMaxLevel() {
-        return 3;
+        return 3; // Like regular Looting
     }
 
     @Override

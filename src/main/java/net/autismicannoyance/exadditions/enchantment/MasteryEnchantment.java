@@ -29,7 +29,9 @@ public class MasteryEnchantment extends Enchantment {
 
     @Override
     public boolean canEnchant(ItemStack stack) {
-        return stack.getItem() instanceof TieredItem;
+        // Only applicable to tools (not weapons)
+        return stack.getItem() instanceof TieredItem &&
+                EnchantmentCategory.DIGGER.canEnchant(stack.getItem());
     }
 
     @Override

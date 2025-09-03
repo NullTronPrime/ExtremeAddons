@@ -31,6 +31,7 @@ public class SmeltingEnchantment extends Enchantment {
 
     @Override
     public boolean canEnchant(ItemStack stack) {
+        // Only works on mining/digging tools
         return stack.getItem() instanceof ShovelItem ||
                 stack.getItem() instanceof PickaxeItem ||
                 stack.getItem() instanceof AxeItem;
@@ -43,6 +44,7 @@ public class SmeltingEnchantment extends Enchantment {
 
     @Override
     public boolean checkCompatibility(Enchantment other) {
+        // Incompatible with Fortune and Silk Touch
         return other != Enchantments.BLOCK_FORTUNE &&
                 other != Enchantments.SILK_TOUCH &&
                 super.checkCompatibility(other);

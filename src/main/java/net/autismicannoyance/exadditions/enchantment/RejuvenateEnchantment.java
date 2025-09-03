@@ -28,6 +28,7 @@ public class RejuvenateEnchantment extends Enchantment {
 
     @Override
     public boolean canEnchant(ItemStack stack) {
+        // Works on all items that can be damaged
         return stack.isDamageableItem();
     }
 
@@ -38,6 +39,7 @@ public class RejuvenateEnchantment extends Enchantment {
 
     @Override
     public boolean checkCompatibility(Enchantment other) {
+        // Incompatible with Mending
         return other != Enchantments.MENDING && super.checkCompatibility(other);
     }
 
