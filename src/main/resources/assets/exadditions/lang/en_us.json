@@ -114,5 +114,9 @@
   "enchantment.exadditions.ring_capacity": "Ring Capacity",
   "enchantment.exadditions.ring_capacity.desc": "Increases the maximum number of protective rings that can be generated.",
   "item.exadditions.super_bundle": "Super Bundle",
-  "item.exadditions.boundless_bundle": "Boundless Bundle"
+  "item.exadditions.boundless_bundle": "Boundless Bundle",
+
+  "potion.exadditions.taunt": "Taunt",
+  "potion.exadditions.long_taunt": "Long Taunt",
+  "potion.exadditions.strong_taunt": "Strong Taunt"
 }

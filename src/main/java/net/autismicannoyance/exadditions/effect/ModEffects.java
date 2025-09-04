@@ -14,6 +14,9 @@ public class ModEffects {
     public static final RegistryObject<MobEffect> ENDEROSIS =
             MOB_EFFECTS.register("enderosis", EnderosisEffect::new);
 
+    public static final RegistryObject<MobEffect> TAUNT =
+            MOB_EFFECTS.register("taunt", TauntEffect::new);
+
     public static void register(IEventBus eventBus) {
         MOB_EFFECTS.register(eventBus);
     }
