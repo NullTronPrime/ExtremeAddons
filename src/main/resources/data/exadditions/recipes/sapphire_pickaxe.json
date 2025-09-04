@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "SSS",
+    " I ",
+    " I "
+  ],
+  "key": {
+    "S": { "item": "exadditions:sapphire" },
+    "I": { "item": "minecraft:stick" }
+  },
+  "result": {
+    "item": "exadditions:sapphire_pickaxe",
+    "count": 1
+  }
+}

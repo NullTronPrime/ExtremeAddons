@@ -42,6 +42,12 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModItems.CHAOS_FRUIT.get());
                         pOutput.accept(ModItems.SUPER_BUNDLE.get());
                         pOutput.accept(ModItems.BOUNDLESS_BUNDLE.get());
+                        pOutput.accept(ModItems.MOB_BUNDLE.get());
+                        pOutput.accept(ModItems.SAPPHIRE_AXE.get());
+                        pOutput.accept(ModItems.SAPPHIRE_HOE.get());
+                        pOutput.accept(ModItems.SAPPHIRE_PICKAXE.get());
+                        pOutput.accept(ModItems.SAPPHIRE_SWORD.get());
+                        pOutput.accept(ModItems.SAPPHIRE_SHOVEL.get());
 
                     })
                     .build());

@@ -118,5 +118,12 @@
 
   "potion.exadditions.taunt": "Taunt",
   "potion.exadditions.long_taunt": "Long Taunt",
-  "potion.exadditions.strong_taunt": "Strong Taunt"
+  "potion.exadditions.strong_taunt": "Strong Taunt",
+
+
+  "item.exadditions.sapphire_sword": "Sapphire Sword",
+  "item.exadditions.sapphire_pickaxe": "Sapphire Pickaxe",
+  "item.exadditions.sapphire_axe": "Sapphire Axe",
+  "item.exadditions.sapphire_shovel": "Sapphire Shovel",
+  "item.exadditions.sapphire_hoe": "Sapphire Hoe"
 }
