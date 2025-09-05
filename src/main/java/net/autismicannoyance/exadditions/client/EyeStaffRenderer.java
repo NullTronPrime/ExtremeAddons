@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Merged EyeWatcher + blocky 3D laser renderer.
  * Uses server-provided per-eye offsets so lasers line up exactly.
+ * Eyes now properly face their targets based on server-sent look direction.
  */
 @Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, value = Dist.CLIENT)
 public final class EyeStaffRenderer {
@@ -73,6 +74,9 @@ public final class EyeStaffRenderer {
             inst.firing = e.firing;
             inst.laserEnd = e.laserEnd;
 
+            // server-provided look direction
+            inst.lookDirection = e.lookDirection;
+
             data.eyes.add(inst);
         }
 
@@ -111,15 +115,8 @@ public final class EyeStaffRenderer {
             data.ensureEyesInitialized(target, mc);
 
             for (EyeInstance inst : data.eyes) {
-                // base world position for this eye — server gave offsets relative to owner (we applied in handlePacket)
-                Vec3 baseWorld = targetPos.add(inst.offset); // important: use targetPos+offset because server offsets are relative to player position earlier;
-                // but server offsets were sent relative to player position. Here we must reconstruct world start:
-                // The server's EyeController used owner.position().add(offset) to compute world; the client replicates the same:
-                // targetPos used here is actually the interpolated target position; for the owner's position we should have used the player's interpolated position.
-                // To keep perfect alignment, if msg.eyes were offsets relative to the player, we should reconstruct baseWorld from the owner's interpolated position.
-                // However, we only have the entityId -> this entity is the owner player; `target` above is the owner (because EyeRenderPacket.entityId is owner).
-                // So `target` is owner, `targetPos` is owner's interpolated position; correct to add offset to owner's position.
-                // (If this was used with EyeEffectPacket previously tied to another entity, this behavior still matches earlier design.)
+                // base world position for this eye
+                Vec3 baseWorld = targetPos.add(inst.offset);
 
                 // inside block repositioning preserved (same as original)
                 if (isInsideBlock(mc, baseWorld)) {
@@ -150,12 +147,24 @@ public final class EyeStaffRenderer {
                     blinkFraction = (float) Math.sin(t * Math.PI);
                 }
 
-                // orientation quaternion: rotate local +Z to look vector
-                Vec3 look = targetPos.subtract(baseWorld);
-                Vector3f lookJ = new Vector3f((float) look.x, (float) look.y, (float) look.z);
-                if (lookJ.length() <= 1e-6f) continue;
-                lookJ.normalize();
-                Quaternionf quat = new Quaternionf().rotationTo(new Vector3f(0f, 0f, 1f), lookJ);
+                // NEW: Compute orientation quaternion based on server-provided look direction
+                Quaternionf quat;
+                if (inst.lookDirection != null && inst.lookDirection.length() > 1e-6) {
+                    // Use server-provided look direction
+                    Vector3f lookJ = new Vector3f((float) inst.lookDirection.x, (float) inst.lookDirection.y, (float) inst.lookDirection.z);
+                    lookJ.normalize();
+                    quat = new Quaternionf().rotationTo(new Vector3f(0f, 0f, 1f), lookJ);
+                } else {
+                    // Fallback - look at the player (owner)
+                    Vec3 look = targetPos.subtract(baseWorld);
+                    Vector3f lookJ = new Vector3f((float) look.x, (float) look.y, (float) look.z);
+                    if (lookJ.length() > 1e-6f) {
+                        lookJ.normalize();
+                        quat = new Quaternionf().rotationTo(new Vector3f(0f, 0f, 1f), lookJ);
+                    } else {
+                        quat = new Quaternionf(); // identity
+                    }
+                }
 
                 // animate iris/pupil jitter
                 animateIris(inst);
@@ -449,7 +458,9 @@ public final class EyeStaffRenderer {
 
         // cap ends (optional: small translucent caps)
         VectorRenderer.drawPlaneWorld(s1, s2, s3, col, true, 1, VectorRenderer.Transform.IDENTITY);
+        VectorRenderer.drawPlaneWorld(s1, s3, s4, col, true, 1, VectorRenderer.Transform.IDENTITY);
         VectorRenderer.drawPlaneWorld(e1, e3, e2, col, true, 1, VectorRenderer.Transform.IDENTITY);
+        VectorRenderer.drawPlaneWorld(e1, e4, e3, col, true, 1, VectorRenderer.Transform.IDENTITY);
     }
 
     /* ---------- data ---------- */
@@ -512,5 +523,6 @@ public final class EyeStaffRenderer {
         // server-driven laser state
         boolean firing = false;
         Vec3 laserEnd = null;
+        Vec3 lookDirection = null; // where the eye should be looking
     }
 }

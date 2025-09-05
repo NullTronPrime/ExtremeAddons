@@ -11,8 +11,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Server -> client packet with per-eye offsets (relative to owner), firing flag and optional laser end.
- * (Also sends optional hitEntityId for convenience; client ignores it if unused.)
+ * Server -> client packet with per-eye offsets (relative to owner), firing flag, laser end, and look direction.
  */
 public final class EyeRenderPacket {
     public final int entityId;
@@ -32,6 +31,7 @@ public final class EyeRenderPacket {
             double oy = buf.readDouble();
             double oz = buf.readDouble();
             boolean firing = buf.readBoolean();
+
             boolean hasEnd = buf.readBoolean();
             Vec3 end = null;
             if (hasEnd) {
@@ -40,8 +40,18 @@ public final class EyeRenderPacket {
                 double ez = buf.readDouble();
                 end = new Vec3(ex, ey, ez);
             }
+
+            boolean hasLook = buf.readBoolean();
+            Vec3 lookDir = null;
+            if (hasLook) {
+                double lx = buf.readDouble();
+                double ly = buf.readDouble();
+                double lz = buf.readDouble();
+                lookDir = new Vec3(lx, ly, lz);
+            }
+
             int hitEntityId = buf.readInt(); // -1 = none
-            list.add(new EyeEntry(new Vec3(ox, oy, oz), firing, end, hitEntityId));
+            list.add(new EyeEntry(new Vec3(ox, oy, oz), firing, end, lookDir, hitEntityId));
         }
         return new EyeRenderPacket(id, list);
     }
@@ -54,6 +64,7 @@ public final class EyeRenderPacket {
             buf.writeDouble(e.offset.y);
             buf.writeDouble(e.offset.z);
             buf.writeBoolean(e.firing);
+
             if (e.laserEnd != null) {
                 buf.writeBoolean(true);
                 buf.writeDouble(e.laserEnd.x);
@@ -62,6 +73,16 @@ public final class EyeRenderPacket {
             } else {
                 buf.writeBoolean(false);
             }
+
+            if (e.lookDirection != null) {
+                buf.writeBoolean(true);
+                buf.writeDouble(e.lookDirection.x);
+                buf.writeDouble(e.lookDirection.y);
+                buf.writeDouble(e.lookDirection.z);
+            } else {
+                buf.writeBoolean(false);
+            }
+
             buf.writeInt(e.hitEntityId);
         }
     }
@@ -80,12 +101,14 @@ public final class EyeRenderPacket {
         public final Vec3 offset;
         public final boolean firing;
         public final Vec3 laserEnd; // nullable
+        public final Vec3 lookDirection; // nullable - direction the eye should face
         public final int hitEntityId; // -1 if none
 
-        public EyeEntry(Vec3 offset, boolean firing, Vec3 laserEnd, int hitEntityId) {
+        public EyeEntry(Vec3 offset, boolean firing, Vec3 laserEnd, Vec3 lookDirection, int hitEntityId) {
             this.offset = offset == null ? Vec3.ZERO : offset;
             this.firing = firing;
             this.laserEnd = laserEnd;
+            this.lookDirection = lookDirection;
             this.hitEntityId = hitEntityId;
         }
     }
