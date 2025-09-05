@@ -40,7 +40,6 @@ public final class EyeStaffRenderer {
     private static final int COLOR_LASER   = 0xFFFF5555; // laser color
 
     private static final int SEGMENTS = 160;
-    private static final double EXPONENT = 0.028;
     private static final double OUTLINE_THICKNESS_FRACT = 0.075;
 
     // keep short TTL so effects expire if server stops sending
@@ -169,7 +168,7 @@ public final class EyeStaffRenderer {
                 // animate iris/pupil jitter
                 animateIris(inst);
 
-                // draw eye exactly as your original code (unchanged)
+                // draw eye with oval shape
                 drawEye(baseWorld, inst, quat, blinkFraction);
 
                 // draw blocky 3D laser if server flagged firing and sent laserEnd
@@ -185,13 +184,14 @@ public final class EyeStaffRenderer {
         RenderSystem.disableBlend();
     }
 
-    /* ---------------- drawing helpers (exactly as your original EyeWatcherRenderer) ---------------- */
+    /* ---------------- drawing helpers (modified for oval shape) ---------------- */
 
     private static void drawEye(Vec3 baseWorld, EyeInstance inst, Quaternionf quat, float blinkFraction) {
         float width = inst.width;
         float height = inst.height * (1f - blinkFraction * 0.92f);
 
-        List<Vec3> local = createAlmondLocal(width, height, SEGMENTS, EXPONENT);
+        // Create oval shape instead of almond
+        List<Vec3> local = createOvalLocal(width, height, SEGMENTS);
         Vec3 centroidLocal = centroidLocal(local);
         Vec3 worldCentroid = baseWorld.add(rotateLocalByQuat(centroidLocal, quat));
 
@@ -224,7 +224,7 @@ public final class EyeStaffRenderer {
             VectorRenderer.drawPlaneWorld(wOutA, wInB, wInA, outlineCol, true, 1, VectorRenderer.Transform.IDENTITY);
         }
 
-        // sclera
+        // sclera (fill the oval)
         int[] scleraCol = new int[]{COLOR_SCLERA, COLOR_SCLERA, COLOR_SCLERA};
         for (int i = 0; i < n; i++) {
             Vec3 a = local.get(i);
@@ -234,9 +234,9 @@ public final class EyeStaffRenderer {
             VectorRenderer.drawPlaneWorld(worldCentroid, wa, wb, scleraCol, true, 1, VectorRenderer.Transform.IDENTITY);
         }
 
-        // pupil
+        // pupil (oval shape)
         float pupilRadius = Math.min(width, height) * 0.32f * (1f - blinkFraction);
-        List<Vec3> pupilLocal = createCircleLocal(pupilRadius, Math.max(20, SEGMENTS / 5));
+        List<Vec3> pupilLocal = createOvalLocal(pupilRadius * 2, pupilRadius * 2, Math.max(20, SEGMENTS / 5));
         Vec3 pupilCenterLocal = new Vec3(inst.pupilOffset.x, inst.pupilOffset.y, 0.0);
         Vec3 worldPupilCenter = baseWorld.add(rotateLocalByQuat(pupilCenterLocal, quat)).add(biasPupil);
         int[] pupilCol = new int[]{COLOR_PUPIL, COLOR_PUPIL, COLOR_PUPIL};
@@ -248,7 +248,7 @@ public final class EyeStaffRenderer {
             VectorRenderer.drawPlaneWorld(worldPupilCenter, wa, wb, pupilCol, true, 1, VectorRenderer.Transform.IDENTITY);
         }
 
-        // iris
+        // iris (circular, kept the same)
         float irisRadius = Math.max(0.02f, pupilRadius * 0.20f);
         List<Vec3> irisLocal = createCircleLocal(irisRadius, 12);
         Vec3 irisCenterLocal = new Vec3(inst.pupilOffset.x + inst.irisOffset.x, inst.pupilOffset.y + inst.irisOffset.y, 0.0);
@@ -263,17 +263,15 @@ public final class EyeStaffRenderer {
         }
     }
 
-    /* ---------------- geometry helpers (unchanged) ---------------- */
+    /* ---------------- geometry helpers (modified for oval) ---------------- */
 
-    private static List<Vec3> createAlmondLocal(double width, double height, int segments, double exponent) {
+    // NEW: Create oval shape instead of almond
+    private static List<Vec3> createOvalLocal(double width, double height, int segments) {
         List<Vec3> pts = new ArrayList<>(segments);
         for (int i = 0; i < segments; i++) {
             double t = (i / (double) segments) * Math.PI * 2.0;
-            double sx = Math.cos(t);
-            double sy = Math.sin(t);
-            double x = sx * (width * 0.5);
-            double vy = Math.pow(Math.abs(sy), exponent);
-            double y = Math.signum(sy) * vy * (height * 0.5);
+            double x = Math.cos(t) * (width * 0.5);
+            double y = Math.sin(t) * (height * 0.5);
             pts.add(new Vec3(x, y, 0.0));
         }
         return pts;
@@ -477,21 +475,11 @@ public final class EyeStaffRenderer {
         }
 
         void ensureEyesInitialized(LivingEntity target, Minecraft mc) {
+            // Server now handles all positioning, so this is mostly unnecessary
+            // but keep for any client-only animation state that wasn't sent from server
             for (EyeInstance inst : eyes) {
                 if (!inst.initialized) {
-                    inst.offset = pickOffsetAroundTarget(target, mc);
-                    float scale = 0.6f + RAND.nextFloat() * 0.9f;
-                    inst.width = scale * 0.88f;
-                    inst.height = scale * 0.45f;
-
-                    inst.pupilOffset = Vec3.ZERO;
-                    inst.pupilTargetOffset = Vec3.ZERO;
-                    inst.pupilJitterTimer = 8 + RAND.nextInt(30);
-                    inst.pupilCenterMaxOffset = Math.max(0.01, inst.width * 0.03);
-                    inst.pupilMaxOffset = Math.max(0.03, Math.min(inst.width * 0.18, inst.height * 0.18));
-                    inst.irisOffset = Vec3.ZERO;
-                    inst.irisTarget = Vec3.ZERO;
-                    inst.irisTimer = 4 + RAND.nextInt(22);
+                    // These should already be set from handlePacket, but just in case:
                     inst.initialized = true;
                 }
             }
