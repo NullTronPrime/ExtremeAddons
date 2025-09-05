@@ -26,22 +26,17 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
 /**
- * VectorRenderer v2 — Command-based renderer with wireframe groups
+ * VectorRenderer v2 — Command-based renderer with wireframe groups and filled polygon support.
  *
- * Key features added/changed from previous version:
- * - Single PlaneCommand constructor to avoid overload ambiguity
- * - Wireframe / WireframeCommand: class-based collection of lines (local/object space) that can be
- *   submitted as a single renderable. It supports rotation/scale/translation around a pivot and can
- *   be anchored to a world point or attached to an entity.
- * - Line drawing (thick lines) retained, plus drawWireframe helpers.
- * - Textured quads are batched by texture.
+ * API highlights:
+ *  - drawLineWorld / drawLineAttached
+ *  - drawPolylineWorld
+ *  - drawPlaneWorld / drawPlaneAttached
+ *  - drawFilledPolygonWorld / drawFilledPolygonAttached
+ *  - drawTexturedQuadWorld / drawTexturedQuadAttached
+ *  - Wireframe creation + drawWireframeWorld / drawWireframeAttached
  *
- * Usage (examples):
- *  - Draw a world line: VectorRenderer.drawLineWorld(new Vec3(0,64,0), new Vec3(1,64,0), 0xFFFF0000, 0.05f, false, 200, Transform.IDENTITY);
- *  - Build a wireframe and submit it anchored to an entity:
- *      Wireframe wf = new Wireframe();
- *      wf.addLine(new Vec3(-1,0,0), new Vec3(1,0,0)); // etc
- *      VectorRenderer.drawWireframeAttached(wf, entityId, Vec3.ZERO, true, 0xFFFFFFFF, 0.03f, false, 200, Transform.fromEuler(Vec3.ZERO, 0,0,0,1f, Vec3.ZERO));
+ * Designed for Forge 1.20.1 (parchment mappings).
  */
 @Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, value = Dist.CLIENT)
 public class VectorRenderer {
@@ -74,6 +69,16 @@ public class VectorRenderer {
 
     public static void drawPlaneAttached(int entityId, Vec3 aOffset, Vec3 bOffset, Vec3 cOffset, int[] perVertexArgb, boolean doubleSided, boolean interpolate, int lifetimeTicks, Transform transform) {
         COMMANDS.add(new PlaneCommand(null, null, null, perVertexArgb, doubleSided, lifetimeTicks, null, new PlaneAttachment(entityId, aOffset, bOffset, cOffset, interpolate), transform));
+    }
+
+    // Filled polygon (triangle fan)
+    public static void drawFilledPolygonWorld(List<Vec3> points, int colorArgb, boolean doubleSided, int lifetimeTicks, Transform transform) {
+        COMMANDS.add(new PolygonCommand(points, colorArgb, doubleSided, lifetimeTicks, null, null, transform));
+    }
+
+    public static void drawFilledPolygonAttached(int entityId, List<Vec3> localOffsets, int colorArgb, boolean doubleSided, boolean interpolate, int lifetimeTicks, Transform transform) {
+        PolygonAttachment pa = new PolygonAttachment(entityId, localOffsets, interpolate);
+        COMMANDS.add(new PolygonCommand(null, colorArgb, doubleSided, lifetimeTicks, null, pa, transform));
     }
 
     // Textured quad
@@ -189,6 +194,18 @@ public class VectorRenderer {
         PlaneAttachment(int entityId, Vec3 a, Vec3 b, Vec3 c, boolean interpolate) { this.entityId = entityId; this.a = a == null ? Vec3.ZERO : a; this.b = b == null ? Vec3.ZERO : b; this.c = c == null ? Vec3.ZERO : c; this.interpolate = interpolate; }
     }
 
+    // Polygon attachment for filled polygons attached to entities
+    private static class PolygonAttachment {
+        final int entityId;
+        final List<Vec3> localPoints;
+        final boolean interpolate;
+        PolygonAttachment(int entityId, List<Vec3> localPoints, boolean interpolate) {
+            this.entityId = entityId;
+            this.localPoints = localPoints == null ? Collections.emptyList() : new ArrayList<>(localPoints);
+            this.interpolate = interpolate;
+        }
+    }
+
     /* -------- Plane (triangle) -------- */
     private static class PlaneCommand extends RenderCommand {
         private final Vec3 aOrig, bOrig, cOrig; // may be null when attached
@@ -262,6 +279,89 @@ public class VectorRenderer {
                 putVertexWithRGBA(buffer, poseMatrix, ta, ca);
                 putVertexWithRGBA(buffer, poseMatrix, tc, cc);
                 putVertexWithRGBA(buffer, poseMatrix, tb, cb);
+            }
+        }
+    }
+
+    /* --------- Polygon (filled triangle-fan) --------- */
+    private static class PolygonCommand extends RenderCommand {
+        // If worldPoints != null -> treat those as absolute world coordinates.
+        // Otherwise polygonAttachment is used (points local to entity).
+        private final List<Vec3> worldPoints;
+        private final int color;
+        private final boolean doubleSided;
+        private final PolygonAttachment polygonAttachment;
+
+        PolygonCommand(List<Vec3> worldPoints, int color, boolean doubleSided, int lifetime, Attachment attachment, PolygonAttachment polygonAttachment, Transform transform) {
+            super(lifetime, transform);
+            this.worldPoints = worldPoints == null ? null : new ArrayList<>(worldPoints);
+            this.color = color;
+            this.doubleSided = doubleSided;
+            this.polygonAttachment = polygonAttachment;
+        }
+
+        @Override
+        void render(BufferBuilder buffer, Matrix4f poseMatrix, Vec3 camPos, float partialTick, Minecraft mc) {
+            List<Vec3> pts = new ArrayList<>();
+            Vec3 base = null;
+
+            if (polygonAttachment != null) {
+                Entity e = mc.level.getEntity(polygonAttachment.entityId);
+                if (e == null) return;
+                if (polygonAttachment.interpolate && GLOBAL_ENABLE_ENTITY_INTERPOLATION) {
+                    double ix = Mth.lerp(partialTick, e.xOld, e.getX());
+                    double iy = Mth.lerp(partialTick, e.yOld, e.getY());
+                    double iz = Mth.lerp(partialTick, e.zOld, e.getZ());
+                    base = new Vec3(ix, iy, iz);
+                } else {
+                    base = e.position();
+                }
+                // local offsets are relative to entity base
+                for (Vec3 local : polygonAttachment.localPoints) {
+                    pts.add(base.add(local));
+                }
+            } else if (worldPoints != null) {
+                for (Vec3 w : worldPoints) pts.add(w);
+            } else {
+                return;
+            }
+
+            if (pts.size() < 3) return;
+
+            // Compute centroid (center) for fan
+            double cx = 0, cy = 0, cz = 0;
+            for (Vec3 p : pts) { cx += p.x; cy += p.y; cz += p.z; }
+            cx /= pts.size(); cy /= pts.size(); cz /= pts.size();
+            Vec3 center = new Vec3(cx, cy, cz);
+
+            // Apply transform to each point and center
+            List<Vec3> transformed = new ArrayList<>(pts.size());
+            for (Vec3 p : pts) transformed.add(applyTransform(p, transform));
+            Vec3 tCenter = applyTransform(center, transform);
+
+            // Camera-relative
+            List<Vec3> rel = new ArrayList<>(transformed.size());
+            for (Vec3 p : transformed) rel.add(p.subtract(camPos));
+            Vec3 relCenter = tCenter.subtract(camPos);
+
+            float[] rgba = unpackColor(color);
+
+            // Emit triangle fan (center, i, i+1)
+            int n = rel.size();
+            for (int i = 0; i < n; i++) {
+                Vec3 a = relCenter;
+                Vec3 b = rel.get(i);
+                Vec3 c = rel.get((i + 1) % n);
+
+                putVertexWithRGBA(buffer, poseMatrix, a, rgba);
+                putVertexWithRGBA(buffer, poseMatrix, b, rgba);
+                putVertexWithRGBA(buffer, poseMatrix, c, rgba);
+
+                if (doubleSided) {
+                    putVertexWithRGBA(buffer, poseMatrix, a, rgba);
+                    putVertexWithRGBA(buffer, poseMatrix, c, rgba);
+                    putVertexWithRGBA(buffer, poseMatrix, b, rgba);
+                }
             }
         }
     }
@@ -577,6 +677,7 @@ public class VectorRenderer {
     }
 
     private static float[] unpackColor(int color) {
+        // returns [r,g,b,a] in 0..1 floats (matches DefaultVertexFormat.POSITION_COLOR)
         float a = ((color >> 24) & 0xFF) / 255f;
         float r = ((color >> 16) & 0xFF) / 255f;
         float g = ((color >> 8) & 0xFF) / 255f;
