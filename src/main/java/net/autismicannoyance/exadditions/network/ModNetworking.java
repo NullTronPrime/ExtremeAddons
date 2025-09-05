@@ -1,30 +1,29 @@
 package net.autismicannoyance.exadditions.network;
 
 import net.autismicannoyance.exadditions.ExAdditions;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.simple.SimpleChannel;
-import net.minecraft.resources.ResourceLocation;
 
-public class ModNetworking {
-    private static final String PROTOCOL = "1";
+/** Central networking registration for ExAdditions */
+public final class ModNetworking {
+    private static final String PROTOCOL_VERSION = "1";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(ExAdditions.MOD_ID, "main"),
-            () -> PROTOCOL,
-            PROTOCOL::equals,
-            PROTOCOL::equals
+            () -> PROTOCOL_VERSION,
+            PROTOCOL_VERSION::equals,
+            PROTOCOL_VERSION::equals
     );
 
     private static int nextId = 0;
+    private static int id() { return nextId++; }
 
-    /** Call during FMLCommonSetupEvent (or mod init) before sending any packets */
+    /** Call this during your mod common setup (FMLCommonSetupEvent). */
     public static void register() {
-        // Register CocoonEffectPacket
-        CHANNEL.registerMessage(
-                nextId++,
-                CocoonEffectPacket.class,
-                CocoonEffectPacket::encode,
-                CocoonEffectPacket::decode,
-                CocoonEffectPacket::handle
-        );
+        CHANNEL.registerMessage(id(), CocoonEffectPacket.class,
+                CocoonEffectPacket::encode, CocoonEffectPacket::decode, CocoonEffectPacket::handle);
+
+        CHANNEL.registerMessage(id(), ChaosCrystalPacket.class,
+                ChaosCrystalPacket::encode, ChaosCrystalPacket::decode, ChaosCrystalPacket::handle);
     }
 }

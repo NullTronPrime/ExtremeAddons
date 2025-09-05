@@ -1,6 +1,7 @@
 {
   "item.exadditions.sapphire": "Sapphire",
   "item.exadditions.raw_sapphire": "Raw Sapphire",
+  "item.exadditions.chaos_crystal": "Chaos Crystal",
   "item.exadditions.metal_detector": "Metal Detector",
   "item.exadditions.metal_detector_v2": "Metal Detector MKII",
   "item.exadditions.fire_resist_charm": "Fire Charm",
@@ -119,7 +120,6 @@
   "potion.exadditions.taunt": "Taunt",
   "potion.exadditions.long_taunt": "Long Taunt",
   "potion.exadditions.strong_taunt": "Strong Taunt",
-
 
   "item.exadditions.sapphire_sword": "Sapphire Sword",
   "item.exadditions.sapphire_pickaxe": "Sapphire Pickaxe",

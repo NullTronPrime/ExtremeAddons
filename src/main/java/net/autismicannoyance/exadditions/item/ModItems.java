@@ -95,7 +95,8 @@ public class ModItems {
             () -> new ShovelItem(ModToolTiers.SAPPHIRE, 0, 0, new Item.Properties()));
     public static final RegistryObject<Item> SAPPHIRE_HOE = ITEMS.register("sapphire_hoe",
             () -> new HoeItem(ModToolTiers.SAPPHIRE, 0, 0, new Item.Properties()));
-
+    public static final RegistryObject<Item> CHAOS_CRYSTAL = ITEMS.register("chaos_crystal",
+            () -> new ChaosCrystalItem(new Item.Properties()));
 
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);
