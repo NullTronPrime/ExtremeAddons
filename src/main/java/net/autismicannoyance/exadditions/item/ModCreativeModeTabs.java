@@ -48,6 +48,7 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModItems.SAPPHIRE_PICKAXE.get());
                         pOutput.accept(ModItems.SAPPHIRE_SWORD.get());
                         pOutput.accept(ModItems.SAPPHIRE_SHOVEL.get());
+                        pOutput.accept(ModItems.EYE_STAFF.get());
 
                     })
                     .build());

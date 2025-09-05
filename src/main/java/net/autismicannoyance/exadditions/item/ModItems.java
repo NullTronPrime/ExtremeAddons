@@ -99,7 +99,8 @@ public class ModItems {
             () -> new ChaosCrystalItem(new Item.Properties()));
     public static final RegistryObject<Item> TESTEYE = ITEMS.register("test_eye",
             () -> new EyeTestItem(new Item.Properties()));
-
+    public static final RegistryObject<Item> EYE_STAFF = ITEMS.register("eye_staff",
+            () -> new StaffOfEyesItem(new Item.Properties()));
 
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);
