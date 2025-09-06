@@ -24,16 +24,16 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Heavily optimized EyeStaffRenderer with batched rendering and reduced geometry complexity
+ * Heavily optimized EyeStaffRenderer with batched rendering and support for large numbers of eyes
  */
 @Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, value = Dist.CLIENT)
 public final class EyeStaffRenderer {
     private static final Map<Integer, EyeEffectData> EFFECTS = new ConcurrentHashMap<>();
     private static final Random RAND = new Random();
 
-    // Reduced complexity settings for performance
+    // Adjusted for higher eye counts
     private static final int MIN_EYES = 2;
-    private static final int MAX_EYES = 24;
+    private static final int MAX_EYES = 100; // Increased to handle tripled count
     private static final double MIN_DIST = 3.0;
     private static final double MAX_DIST = 6.0;
 
@@ -43,25 +43,30 @@ public final class EyeStaffRenderer {
     private static final int COLOR_IRIS    = 0xFF000000;
     private static final int COLOR_LASER   = 0xFFFF5555;
 
-    // Dramatically reduced geometry complexity
-    private static final int SEGMENTS = 32; // Reduced from 160
+    // Further reduced geometry complexity for performance with more eyes
+    private static final int SEGMENTS = 24; // Reduced from 32
     private static final double OUTLINE_THICKNESS_FRACT = 0.075;
 
     private static final int CLIENT_TTL = 40;
 
-    // Pre-calculated geometry cache
-    private static List<Vec3> CACHED_CIRCLE_32;
-    private static List<Vec3> CACHED_CIRCLE_16;
-    private static List<Vec3> CACHED_CIRCLE_8;
+    // Pre-calculated geometry cache - even more simplified
+    private static List<Vec3> CACHED_CIRCLE_24;
+    private static List<Vec3> CACHED_CIRCLE_12;
+    private static List<Vec3> CACHED_CIRCLE_6;
 
     // Batch rendering data
     private static final List<EyeRenderData> RENDER_BATCH = new ArrayList<>();
 
+    // Performance settings for large eye counts
+    private static final int MAX_RENDERED_EYES = 60; // Limit rendered eyes for performance
+    private static final double LOD_DISTANCE_CLOSE = 16.0; // Full detail
+    private static final double LOD_DISTANCE_FAR = 32.0;   // Reduced detail
+
     static {
         // Pre-calculate geometry to avoid repeated calculations
-        CACHED_CIRCLE_32 = createCircleLocal(1.0, 32);
-        CACHED_CIRCLE_16 = createCircleLocal(1.0, 16);
-        CACHED_CIRCLE_8 = createCircleLocal(1.0, 8);
+        CACHED_CIRCLE_24 = createCircleLocal(1.0, 24);
+        CACHED_CIRCLE_12 = createCircleLocal(1.0, 12);
+        CACHED_CIRCLE_6 = createCircleLocal(1.0, 6);
     }
 
     public static void handlePacket(net.autismicannoyance.exadditions.network.EyeRenderPacket msg) {
@@ -155,12 +160,28 @@ public final class EyeStaffRenderer {
 
             data.ensureEyesInitialized(target, mc);
 
-            for (EyeInstance inst : data.eyes) {
+            // Performance optimization: sort eyes by distance and limit rendered count
+            List<EyeDistancePair> eyeDistances = new ArrayList<>();
+            for (int i = 0; i < data.eyes.size(); i++) {
+                EyeInstance inst = data.eyes.get(i);
                 Vec3 baseWorld = targetPos.add(inst.offset);
-
-                // Distance culling - don't render eyes that are too far
                 double distanceToCamera = baseWorld.distanceToSqr(cameraPos);
-                if (distanceToCamera > 64 * 64) continue; // Skip distant eyes
+                eyeDistances.add(new EyeDistancePair(inst, distanceToCamera, i));
+            }
+
+            // Sort by distance (closest first) and limit count
+            eyeDistances.sort(Comparator.comparingDouble(pair -> pair.distance));
+            int maxRender = Math.min(MAX_RENDERED_EYES, eyeDistances.size());
+
+            for (int i = 0; i < maxRender; i++) {
+                EyeDistancePair pair = eyeDistances.get(i);
+                EyeInstance inst = pair.eye;
+                double distanceToCamera = pair.distance;
+
+                // Skip very distant eyes
+                if (distanceToCamera > LOD_DISTANCE_FAR * LOD_DISTANCE_FAR) continue;
+
+                Vec3 baseWorld = targetPos.add(inst.offset);
 
                 if (isInsideBlock(mc, baseWorld)) {
                     inst.repositionTimer--;
@@ -192,8 +213,11 @@ public final class EyeStaffRenderer {
                 // Check if eye is facing camera for outline visibility
                 boolean facingCamera = isEyeFacingCamera(baseWorld, quat, cameraPos);
 
+                // Determine LOD level based on distance
+                int lodLevel = determineLODLevel(distanceToCamera);
+
                 // Add to batch instead of immediate rendering
-                RENDER_BATCH.add(new EyeRenderData(baseWorld, inst, quat, blinkFraction, facingCamera));
+                RENDER_BATCH.add(new EyeRenderData(baseWorld, inst, quat, blinkFraction, facingCamera, lodLevel));
             }
         }
 
@@ -207,6 +231,16 @@ public final class EyeStaffRenderer {
 
         RenderSystem.enableCull();
         RenderSystem.disableBlend();
+    }
+
+    private static int determineLODLevel(double distanceSquared) {
+        if (distanceSquared < LOD_DISTANCE_CLOSE * LOD_DISTANCE_CLOSE) {
+            return 2; // High detail
+        } else if (distanceSquared < LOD_DISTANCE_FAR * LOD_DISTANCE_FAR) {
+            return 1; // Medium detail
+        } else {
+            return 0; // Low detail
+        }
     }
 
     private static void renderEyesBatched(Matrix4f poseMatrix, Vec3 cameraPos) {
@@ -230,14 +264,20 @@ public final class EyeStaffRenderer {
         Quaternionf quat = renderData.quat;
         float blinkFraction = renderData.blinkFraction;
         boolean facingCamera = renderData.facingCamera;
+        int lodLevel = renderData.lodLevel;
 
         float width = inst.width;
         float height = inst.height * (1f - blinkFraction * 0.95f);
 
-        // Use cached geometry and scale it
-        List<Vec3> local = scaleCircle(CACHED_CIRCLE_32, width, height);
-        Vec3 centroidLocal = Vec3.ZERO; // For circles, centroid is origin
+        // Select geometry based on LOD level
+        List<Vec3> local;
+        switch (lodLevel) {
+            case 2: local = scaleCircle(CACHED_CIRCLE_24, width, height); break;
+            case 1: local = scaleCircle(CACHED_CIRCLE_12, width, height); break;
+            default: local = scaleCircle(CACHED_CIRCLE_6, width, height); break;
+        }
 
+        Vec3 centroidLocal = Vec3.ZERO; // For circles, centroid is origin
         Vec3 worldCentroid = baseWorld.add(rotateLocalByQuat(centroidLocal, quat));
 
         // Simplified depth biasing
@@ -248,30 +288,30 @@ public final class EyeStaffRenderer {
         Vec3 biasPupil = forward.scale(baseBias * 1.05);
         Vec3 biasIris = forward.scale(baseBias * 1.9);
 
-        // Only render outline if facing camera and not too distant
-        if (facingCamera && baseWorld.distanceToSqr(cameraPos) < 32 * 32) {
-            renderOutline(buffer, poseMatrix, local, baseWorld, quat, width, biasOutline, biasSclera, cameraPos);
+        // Only render outline if facing camera, not too distant, and high LOD
+        if (facingCamera && lodLevel >= 1 && baseWorld.distanceToSqr(cameraPos) < 32 * 32) {
+            renderOutline(buffer, poseMatrix, local, baseWorld, quat, width, biasOutline, biasSclera, cameraPos, lodLevel);
         }
 
         // Render sclera (main eye body) with reduced complexity
-        renderSclera(buffer, poseMatrix, local, worldCentroid, baseWorld, quat, biasSclera, cameraPos);
+        renderSclera(buffer, poseMatrix, local, worldCentroid, baseWorld, quat, biasSclera, cameraPos, lodLevel);
 
-        // Render pupil with reduced complexity
-        renderPupil(buffer, poseMatrix, inst, baseWorld, quat, blinkFraction, biasPupil, cameraPos);
-
-        // Render iris with reduced complexity
-        renderIris(buffer, poseMatrix, inst, baseWorld, quat, blinkFraction, biasIris, cameraPos);
+        // Render pupil and iris only for higher LOD levels
+        if (lodLevel >= 1) {
+            renderPupil(buffer, poseMatrix, inst, baseWorld, quat, blinkFraction, biasPupil, cameraPos, lodLevel);
+            renderIris(buffer, poseMatrix, inst, baseWorld, quat, blinkFraction, biasIris, cameraPos, lodLevel);
+        }
     }
 
     private static void renderOutline(BufferBuilder buffer, Matrix4f poseMatrix, List<Vec3> local,
-                                      Vec3 baseWorld, Quaternionf quat, float width, Vec3 biasOutline, Vec3 biasSclera, Vec3 cameraPos) {
+                                      Vec3 baseWorld, Quaternionf quat, float width, Vec3 biasOutline, Vec3 biasSclera, Vec3 cameraPos, int lodLevel) {
         double outlineAmount = width * OUTLINE_THICKNESS_FRACT;
         List<Vec3> outerLocal = offsetPolygonSimplified(local, outlineAmount);
 
         int[] outlineCol = new int[]{COLOR_OUTLINE, COLOR_OUTLINE, COLOR_OUTLINE};
 
-        // Reduce outline complexity by using fewer segments
-        int step = Math.max(1, local.size() / 16); // Use only every nth point
+        // Adjust step size based on LOD
+        int step = Math.max(1, local.size() / (lodLevel == 2 ? 16 : 8));
         for (int i = 0; i < local.size(); i += step) {
             int nextI = Math.min(i + step, local.size() - 1);
             if (nextI == i) break;
@@ -292,12 +332,12 @@ public final class EyeStaffRenderer {
     }
 
     private static void renderSclera(BufferBuilder buffer, Matrix4f poseMatrix, List<Vec3> local,
-                                     Vec3 worldCentroid, Vec3 baseWorld, Quaternionf quat, Vec3 biasSclera, Vec3 cameraPos) {
+                                     Vec3 worldCentroid, Vec3 baseWorld, Quaternionf quat, Vec3 biasSclera, Vec3 cameraPos, int lodLevel) {
         int[] scleraCol = new int[]{COLOR_SCLERA, COLOR_SCLERA, COLOR_SCLERA};
         Vec3 relCentroid = worldCentroid.subtract(cameraPos);
 
-        // Reduce sclera complexity
-        int step = Math.max(1, local.size() / 16);
+        // Adjust step size based on LOD
+        int step = Math.max(1, local.size() / (lodLevel == 2 ? 16 : (lodLevel == 1 ? 12 : 6)));
         for (int i = 0; i < local.size(); i += step) {
             int nextI = (i + step) % local.size();
             Vec3 a = local.get(i);
@@ -310,11 +350,11 @@ public final class EyeStaffRenderer {
     }
 
     private static void renderPupil(BufferBuilder buffer, Matrix4f poseMatrix, EyeInstance inst,
-                                    Vec3 baseWorld, Quaternionf quat, float blinkFraction, Vec3 biasPupil, Vec3 cameraPos) {
+                                    Vec3 baseWorld, Quaternionf quat, float blinkFraction, Vec3 biasPupil, Vec3 cameraPos, int lodLevel) {
         float pupilRadius = Math.min(inst.width, inst.height) * 0.32f * (1f - blinkFraction);
 
-        // Use much simpler geometry for pupils
-        List<Vec3> pupilLocal = scaleCircle(CACHED_CIRCLE_8, pupilRadius * 2, pupilRadius * 2);
+        // Use even simpler geometry for pupils based on LOD
+        List<Vec3> pupilLocal = scaleCircle(lodLevel >= 2 ? CACHED_CIRCLE_12 : CACHED_CIRCLE_6, pupilRadius * 2, pupilRadius * 2);
 
         Vec3 pupilCenterLocal = new Vec3(
                 inst.pupilOffset.x * (1f - blinkFraction),
@@ -336,12 +376,12 @@ public final class EyeStaffRenderer {
     }
 
     private static void renderIris(BufferBuilder buffer, Matrix4f poseMatrix, EyeInstance inst,
-                                   Vec3 baseWorld, Quaternionf quat, float blinkFraction, Vec3 biasIris, Vec3 cameraPos) {
+                                   Vec3 baseWorld, Quaternionf quat, float blinkFraction, Vec3 biasIris, Vec3 cameraPos, int lodLevel) {
         float pupilRadius = Math.min(inst.width, inst.height) * 0.32f * (1f - blinkFraction);
         float irisRadius = Math.max(0.02f, pupilRadius * 0.20f);
 
         // Use simplest geometry for iris
-        List<Vec3> irisLocal = scaleCircle(CACHED_CIRCLE_8, irisRadius * 2, irisRadius * 2);
+        List<Vec3> irisLocal = scaleCircle(CACHED_CIRCLE_6, irisRadius * 2, irisRadius * 2);
 
         Vec3 irisCenterLocal = new Vec3(
                 (inst.pupilOffset.x + inst.irisOffset.x) * (1f - blinkFraction * 0.5f),
@@ -385,6 +425,19 @@ public final class EyeStaffRenderer {
         buffer.vertex(poseMatrix, (float) c.x, (float) c.y, (float) c.z)
                 .color(cc[0], cc[1], cc[2], cc[3])
                 .endVertex();
+    }
+
+    // Helper class for eye distance sorting
+    private static class EyeDistancePair {
+        final EyeInstance eye;
+        final double distance;
+        final int originalIndex;
+
+        EyeDistancePair(EyeInstance eye, double distance, int originalIndex) {
+            this.eye = eye;
+            this.distance = distance;
+            this.originalIndex = originalIndex;
+        }
     }
 
     // Simplified geometry helpers
@@ -613,20 +666,22 @@ public final class EyeStaffRenderer {
         float serverBlinkPhase = 0.0f;
     }
 
-    // Batch rendering data structure
+    // Enhanced batch rendering data structure
     private static final class EyeRenderData {
         final Vec3 baseWorld;
         final EyeInstance inst;
         final Quaternionf quat;
         final float blinkFraction;
         final boolean facingCamera;
+        final int lodLevel; // Level of Detail: 0=low, 1=medium, 2=high
 
-        EyeRenderData(Vec3 baseWorld, EyeInstance inst, Quaternionf quat, float blinkFraction, boolean facingCamera) {
+        EyeRenderData(Vec3 baseWorld, EyeInstance inst, Quaternionf quat, float blinkFraction, boolean facingCamera, int lodLevel) {
             this.baseWorld = baseWorld;
             this.inst = inst;
             this.quat = quat;
             this.blinkFraction = blinkFraction;
             this.facingCamera = facingCamera;
+            this.lodLevel = lodLevel;
         }
     }
 }

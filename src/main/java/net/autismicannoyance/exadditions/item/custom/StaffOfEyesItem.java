@@ -22,21 +22,53 @@ import net.minecraftforge.network.PacketDistributor;
 import java.util.*;
 
 /**
- * Enhanced StaffOfEyes with piercing lasers, knockback, and center targeting
+ * Enhanced StaffOfEyes with piercing lasers, knockback, orbit visualization, and mob support
  */
 public class StaffOfEyesItem extends Item {
-    public StaffOfEyesItem(Properties props) { super(props); }
+    // Staff configuration - stored per ItemStack
+    private static final String EYE_COUNT_TAG = "eye_count";
+    private static final int DEFAULT_EYE_COUNT = 45; // Tripled from 15
+
+    public StaffOfEyesItem(Properties props) {
+        super(props);
+    }
+
+    /**
+     * Get the eye count for this specific staff
+     */
+    public static int getEyeCount(ItemStack stack) {
+        if (stack.hasTag() && stack.getTag().contains(EYE_COUNT_TAG)) {
+            return stack.getTag().getInt(EYE_COUNT_TAG);
+        }
+        return DEFAULT_EYE_COUNT;
+    }
+
+    /**
+     * Set the eye count for this specific staff
+     */
+    public static void setEyeCount(ItemStack stack, int count) {
+        stack.getOrCreateTag().putInt(EYE_COUNT_TAG, Math.max(1, count));
+    }
 
     @Override
     public void inventoryTick(ItemStack stack, Level level, Entity entity, int slot, boolean selected) {
         super.inventoryTick(stack, level, entity, slot, selected);
         if (level.isClientSide) return;
-        if (!(entity instanceof Player p)) return;
+        if (!(entity instanceof LivingEntity livingEntity)) return;
 
-        if (selected && p.getMainHandItem() == stack) {
-            if (p instanceof ServerPlayer sp) EyeController.ensure(sp);
+        // Check if this entity is holding the staff in main hand
+        boolean isHoldingStaff = false;
+        if (entity instanceof Player p) {
+            isHoldingStaff = selected && p.getMainHandItem() == stack;
         } else {
-            if (p instanceof ServerPlayer sp) EyeController.remove(sp);
+            // For mobs, check if they're holding it in main hand
+            isHoldingStaff = livingEntity.getMainHandItem() == stack;
+        }
+
+        if (isHoldingStaff) {
+            EyeController.ensure(livingEntity, stack);
+        } else {
+            EyeController.remove(livingEntity);
         }
     }
 
@@ -46,37 +78,45 @@ public class StaffOfEyesItem extends Item {
         private static final Random RAND = new Random();
 
         // tuning
-        private static final int MAX_EYES = 15;
         private static final double LOCK_DISTANCE = 12.0;
         private static final double SEARCH_RADIUS = 16.0;
         private static final int PACKET_INTERVAL = 2;
         private static final float LASER_DAMAGE = 4.0f;
-        private static final float LASER_KNOCKBACK_STRENGTH = 1.2f; // Knockback strength
-        private static final double LASER_MAX_RANGE = 32.0; // Maximum laser range
+        private static final float LASER_KNOCKBACK_STRENGTH = 0.6f; // Halved from 1.2f
+        private static final double LASER_MAX_RANGE = 32.0;
         private static final int AIM_THRESHOLD = 5;
         private static final int FIRE_COOLDOWN_MIN = 15;
         private static final int FIRE_COOLDOWN_MAX = 30;
 
-        // orbital system constants
-        private static final double[] ORBITAL_RADII = {2.5, 3.8, 5.2};
-        private static final double[] ORBITAL_HEIGHTS = {0.8, 1.5, 2.2};
-        private static final double[] ORBITAL_SPEEDS = {0.008, 0.006, 0.004};
+        // orbital system constants - adjusted for more eyes
+        private static final double[] ORBITAL_RADII = {2.0, 3.0, 4.0, 5.0, 6.0}; // More rings for more eyes
+        private static final double[] ORBITAL_HEIGHTS = {0.5, 1.0, 1.5, 2.0, 2.5};
+        private static final double[] ORBITAL_SPEEDS = {0.010, 0.008, 0.006, 0.004, 0.002};
 
-        private final ServerPlayer owner;
+        // Orbit ring visualization settings
+        private static final int ORBIT_RING_SEGMENTS = 64; // Resolution of orbit rings
+        private static final float ORBIT_RING_THICKNESS = 0.02f;
+        private static final int ORBIT_RING_COLOR = 0x30FF0000; // Semi-transparent red
+
+        private final LivingEntity owner;
+        private final ItemStack staffStack;
         private final List<Eye> eyes = new ArrayList<>();
         private int tick = 0;
 
-        private EyeController(ServerPlayer owner) {
+        private EyeController(LivingEntity owner, ItemStack staffStack) {
             this.owner = owner;
-            int count = Math.min(MAX_EYES, 6 + RAND.nextInt(5));
+            this.staffStack = staffStack;
 
-            for (int i = 0; i < count; i++) {
+            int eyeCount = getEyeCount(staffStack);
+            int ringsUsed = Math.min(ORBITAL_RADII.length, (eyeCount + 8) / 9); // Distribute eyes across rings
+
+            for (int i = 0; i < eyeCount; i++) {
                 Eye e = new Eye();
 
-                e.orbitalRing = i % 3;
-                double eyesInThisRing = Math.ceil(count / 3.0);
+                e.orbitalRing = i % ringsUsed;
+                double eyesInThisRing = Math.ceil((double)eyeCount / ringsUsed);
                 double angleStep = (Math.PI * 2.0) / eyesInThisRing;
-                double ringIndex = i / 3;
+                double ringIndex = i / (double)ringsUsed;
                 e.orbitalAngle = ringIndex * angleStep + RAND.nextDouble() * 0.5;
 
                 updateEyeOrbitalPosition(e);
@@ -98,7 +138,7 @@ public class StaffOfEyesItem extends Item {
         }
 
         private void updateEyeOrbitalPosition(Eye eye) {
-            int ring = eye.orbitalRing;
+            int ring = Math.min(eye.orbitalRing, ORBITAL_RADII.length - 1);
             double radius = ORBITAL_RADII[ring];
             double height = ORBITAL_HEIGHTS[ring] + Math.sin(tick * 0.01 + eye.hashCode()) * 0.15;
 
@@ -108,16 +148,41 @@ public class StaffOfEyesItem extends Item {
             eye.offset = new Vec3(x, height, z);
         }
 
-        public static void ensure(ServerPlayer p) {
-            INSTANCES.computeIfAbsent(p.getUUID(), u -> new EyeController(p));
+        public static void ensure(LivingEntity entity, ItemStack staffStack) {
+            UUID entityId = entity.getUUID();
+            EyeController existing = INSTANCES.get(entityId);
+
+            // If controller exists but staff changed, recreate it
+            if (existing != null && !ItemStack.isSameItem(existing.staffStack, staffStack)) {
+                remove(entity);
+                existing = null;
+            }
+
+            if (existing == null) {
+                INSTANCES.put(entityId, new EyeController(entity, staffStack));
+            }
         }
 
-        public static void remove(ServerPlayer p) {
-            EyeController removed = INSTANCES.remove(p.getUUID());
+        public static void remove(LivingEntity entity) {
+            EyeController removed = INSTANCES.remove(entity.getUUID());
             if (removed != null) {
                 List<EyeRenderPacket.EyeEntry> emptyList = Collections.emptyList();
-                EyeRenderPacket clear = new EyeRenderPacket(p.getId(), emptyList);
-                ModNetworking.CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> p), clear);
+                EyeRenderPacket clear = new EyeRenderPacket(entity.getId(), emptyList);
+
+                // Send to all tracking players
+                if (entity.level() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                    ModNetworking.CHANNEL.send(
+                            PacketDistributor.TRACKING_ENTITY.with(() -> entity),
+                            clear
+                    );
+                    // Also send to the entity itself if it's a player
+                    if (entity instanceof ServerPlayer serverPlayer) {
+                        ModNetworking.CHANNEL.send(
+                                PacketDistributor.PLAYER.with(() -> serverPlayer),
+                                clear
+                        );
+                    }
+                }
             }
         }
 
@@ -125,7 +190,7 @@ public class StaffOfEyesItem extends Item {
             List<UUID> toRemove = new ArrayList<>();
             for (Map.Entry<UUID, EyeController> e : INSTANCES.entrySet()) {
                 EyeController c = e.getValue();
-                if (c.owner.isRemoved() || !isPlayerHoldingStaff(c.owner)) {
+                if (c.owner.isRemoved() || !isEntityHoldingStaff(c.owner, c.staffStack)) {
                     toRemove.add(e.getKey());
                     continue;
                 }
@@ -139,9 +204,10 @@ public class StaffOfEyesItem extends Item {
             }
         }
 
-        private static boolean isPlayerHoldingStaff(ServerPlayer p) {
-            ItemStack main = p.getMainHandItem();
-            return main.getItem() instanceof StaffOfEyesItem;
+        private static boolean isEntityHoldingStaff(LivingEntity entity, ItemStack expectedStaff) {
+            ItemStack mainHand = entity.getMainHandItem();
+            return mainHand.getItem() instanceof StaffOfEyesItem &&
+                    ItemStack.isSameItem(mainHand, expectedStaff);
         }
 
         private void tick() {
@@ -151,7 +217,7 @@ public class StaffOfEyesItem extends Item {
             LivingEntity target = findNearestTargetWithin(SEARCH_RADIUS);
 
             boolean locked = false;
-            if (target != null) {
+            if (target != null && target != owner) { // Make sure we don't target ourselves
                 double d2 = target.distanceToSqr(owner);
                 if (d2 <= LOCK_DISTANCE * LOCK_DISTANCE) locked = true;
             }
@@ -160,17 +226,18 @@ public class StaffOfEyesItem extends Item {
                 updateBlinking(e);
 
                 if (!locked || target == null) {
-                    // IDLE MODE: Orbital movement with player-facing
-                    e.orbitalAngle += ORBITAL_SPEEDS[e.orbitalRing];
+                    // IDLE MODE: Orbital movement with owner-facing
+                    int ring = Math.min(e.orbitalRing, ORBITAL_SPEEDS.length - 1);
+                    e.orbitalAngle += ORBITAL_SPEEDS[ring];
                     if (e.orbitalAngle > Math.PI * 2.0) e.orbitalAngle -= Math.PI * 2.0;
 
                     updateEyeOrbitalPosition(e);
 
                     Vec3 eyeWorld = owner.position().add(e.offset);
-                    Vec3 playerCenter = owner.position().add(0, owner.getBbHeight() * 0.5, 0);
-                    Vec3 lookToPlayer = playerCenter.subtract(eyeWorld);
-                    if (lookToPlayer.length() > 1e-6) {
-                        e.look = lookToPlayer.normalize();
+                    Vec3 ownerCenter = owner.position().add(0, owner.getBbHeight() * 0.5, 0);
+                    Vec3 lookToOwner = ownerCenter.subtract(eyeWorld);
+                    if (lookToOwner.length() > 1e-6) {
+                        e.look = lookToOwner.normalize();
                     }
 
                     e.aimTicks = 0;
@@ -179,7 +246,7 @@ public class StaffOfEyesItem extends Item {
                 } else {
                     // LOCKED MODE: Fixed position, track target center
                     Vec3 eyeWorld = owner.position().add(e.offset);
-                    Vec3 targetCenter = getEntityCenter(target); // Target center instead of bottom
+                    Vec3 targetCenter = getEntityCenter(target);
                     Vec3 dir = targetCenter.subtract(eyeWorld);
                     if (dir.length() > 1e-6) e.look = dir.normalize();
 
@@ -189,7 +256,6 @@ public class StaffOfEyesItem extends Item {
                     boolean canFire = e.aimTicks >= AIM_THRESHOLD && e.fireCooldown <= 0;
 
                     if (canFire) {
-                        // Perform piercing laser trace
                         LaserResult laserResult = performPiercingLaser(eyeWorld, targetCenter);
 
                         e.firing = true;
@@ -197,7 +263,6 @@ public class StaffOfEyesItem extends Item {
                         e.fireCooldown = FIRE_COOLDOWN_MIN + RAND.nextInt(FIRE_COOLDOWN_MAX - FIRE_COOLDOWN_MIN + 1);
                         e.aimTicks = 0;
 
-                        // Apply damage and knockback to all hit entities
                         for (LivingEntity hitEntity : laserResult.hitEntities) {
                             applyLaserEffects(hitEntity, eyeWorld, laserResult.endPoint);
                         }
@@ -208,12 +273,53 @@ public class StaffOfEyesItem extends Item {
                 }
             }
 
+            // Render orbit rings
+            //renderOrbitRings();
+
             if (tick % PACKET_INTERVAL == 0) sendRenderPacket();
         }
 
         /**
-         * Gets the center point of an entity (middle of bounding box)
+         * Renders visible orbit rings using VectorRenderer
          */
+//        private void renderOrbitRings() {
+//            if (!(owner.level() instanceof net.minecraft.server.level.ServerLevel)) return;
+//
+//            // Determine which rings are actually used
+//            Set<Integer> usedRings = new HashSet<>();
+//            for (Eye eye : eyes) {
+//                usedRings.add(Math.min(eye.orbitalRing, ORBITAL_RADII.length - 1));
+//            }
+//
+//            Vec3 ownerPos = owner.position();
+//
+//            // Create ring wireframes for each used orbital ring
+//            for (int ring : usedRings) {
+//                double radius = ORBITAL_RADII[ring];
+//                double height = ORBITAL_HEIGHTS[ring];
+//                Vec3 ringCenter = ownerPos.add(0, height, 0);
+//
+//                // Create circle points
+//                List<Vec3> ringPoints = new ArrayList<>();
+//                for (int i = 0; i <= ORBIT_RING_SEGMENTS; i++) {
+//                    double angle = (i / (double)ORBIT_RING_SEGMENTS) * Math.PI * 2.0;
+//                    double x = Math.cos(angle) * radius;
+//                    double z = Math.sin(angle) * radius;
+//                    ringPoints.add(ringCenter.add(x, 0, z));
+//                }
+//
+//                // Draw the ring as a polyline
+//                net.autismicannoyance.exadditions.client.VectorRenderer.drawPolylineWorld(
+//                        ringPoints,
+//                        ORBIT_RING_COLOR,
+//                        ORBIT_RING_THICKNESS,
+//                        false, // thickness is not in pixels
+//                        40, // lifetime ticks
+//                        net.autismicannoyance.exadditions.client.VectorRenderer.Transform.IDENTITY
+//                );
+//            }
+//        }
+
         private Vec3 getEntityCenter(LivingEntity entity) {
             return new Vec3(
                     entity.getX(),
@@ -222,14 +328,10 @@ public class StaffOfEyesItem extends Item {
             );
         }
 
-        /**
-         * Performs a piercing laser trace that can hit multiple entities
-         */
         private LaserResult performPiercingLaser(Vec3 start, Vec3 initialTarget) {
             Vec3 direction = initialTarget.subtract(start).normalize();
             Vec3 end = start.add(direction.scale(LASER_MAX_RANGE));
 
-            // Find the first wall hit
             ClipContext clipContext = new ClipContext(start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, owner);
             BlockHitResult blockHit = owner.level().clip(clipContext);
 
@@ -238,7 +340,6 @@ public class StaffOfEyesItem extends Item {
                 actualEnd = blockHit.getLocation();
             }
 
-            // Find all entities along the laser path
             List<LivingEntity> hitEntities = new ArrayList<>();
             AABB searchBox = new AABB(start, actualEnd).inflate(1.0);
 
@@ -254,29 +355,22 @@ public class StaffOfEyesItem extends Item {
                 }
             }
 
-            // Sort by distance from laser start
             hitEntities.sort(Comparator.comparingDouble(entity -> entity.distanceToSqr(start.x, start.y, start.z)));
 
             return new LaserResult(actualEnd, hitEntities);
         }
 
-        /**
-         * Checks if an entity intersects with the laser path
-         */
         private boolean isEntityInLaserPath(Vec3 laserStart, Vec3 laserEnd, LivingEntity entity) {
             AABB entityBox = entity.getBoundingBox();
 
-            // Use a slightly thicker ray for the laser
             Vec3 direction = laserEnd.subtract(laserStart).normalize();
             double laserLength = laserStart.distanceTo(laserEnd);
 
-            // Check multiple points along the laser path
-            int checkPoints = Math.max(3, (int)(laserLength / 2.0)); // Check every 2 blocks
+            int checkPoints = Math.max(3, (int)(laserLength / 2.0));
             for (int i = 0; i <= checkPoints; i++) {
                 double t = (double)i / checkPoints;
                 Vec3 checkPoint = laserStart.add(direction.scale(laserLength * t));
 
-                // Add small radius around the laser
                 AABB laserPoint = new AABB(checkPoint, checkPoint).inflate(0.3);
                 if (entityBox.intersects(laserPoint)) {
                     return true;
@@ -286,130 +380,35 @@ public class StaffOfEyesItem extends Item {
             return false;
         }
 
-        /**
-         * Overloaded version for any Entity (including projectiles)
-         */
-        private boolean isEntityInLaserPath(Vec3 laserStart, Vec3 laserEnd, Entity entity) {
-            AABB entityBox = entity.getBoundingBox();
-
-            Vec3 direction = laserEnd.subtract(laserStart).normalize();
-            double laserLength = laserStart.distanceTo(laserEnd);
-
-            // For projectiles, use a thicker detection radius
-            double detectionRadius = entity instanceof net.minecraft.world.entity.projectile.Projectile ? 0.5 : 0.3;
-
-            int checkPoints = Math.max(3, (int)(laserLength / 2.0));
-            for (int i = 0; i <= checkPoints; i++) {
-                double t = (double)i / checkPoints;
-                Vec3 checkPoint = laserStart.add(direction.scale(laserLength * t));
-
-                AABB laserPoint = new AABB(checkPoint, checkPoint).inflate(detectionRadius);
-                if (entityBox.intersects(laserPoint)) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        /**
-         * Checks if an entity is a projectile that can be deflected
-         */
-        private boolean isProjectile(Entity entity) {
-            return entity instanceof net.minecraft.world.entity.projectile.Projectile ||
-                    entity instanceof net.minecraft.world.entity.projectile.Arrow ||
-                    entity instanceof net.minecraft.world.entity.projectile.FireworkRocketEntity ||
-                    entity instanceof net.minecraft.world.entity.projectile.ThrownTrident ||
-                    entity instanceof net.minecraft.world.entity.projectile.AbstractHurtingProjectile ||
-                    entity.getType().toString().toLowerCase().contains("projectile") ||
-                    entity.getType().toString().toLowerCase().contains("arrow") ||
-                    entity.getType().toString().toLowerCase().contains("bolt");
-        }
-
-        /**
-         * Deflects a projectile when hit by laser
-         */
-        private void deflectProjectile(Entity projectile, Vec3 laserStart, Vec3 laserEnd) {
-            Vec3 laserDirection = laserEnd.subtract(laserStart).normalize();
-            Vec3 projectileVelocity = projectile.getDeltaMovement();
-
-            // Calculate deflection - mix of reflection and laser direction
-            Vec3 reflected = projectileVelocity.subtract(laserDirection.scale(2 * projectileVelocity.dot(laserDirection)));
-            Vec3 deflected = reflected.scale(0.7).add(laserDirection.scale(0.3));
-
-            // Add some randomness for chaotic deflection
-            Vec3 randomOffset = new Vec3(
-                    (RAND.nextDouble() - 0.5) * 0.4,
-                    (RAND.nextDouble() - 0.5) * 0.4,
-                    (RAND.nextDouble() - 0.5) * 0.4
-            );
-
-            deflected = deflected.add(randomOffset).normalize().scale(deflected.length() * 1.2); // Slightly faster
-
-            // Apply the deflection
-            projectile.setDeltaMovement(deflected);
-            projectile.hurtMarked = true;
-
-            // Change projectile ownership if possible (make it friendly)
-            if (projectile instanceof net.minecraft.world.entity.projectile.Projectile proj) {
-                try {
-                    proj.setOwner(owner); // Make deflected projectiles friendly
-                } catch (Exception e) {
-                    // Some projectiles might not allow owner changes
-                }
-            }
-
-            // Visual effect for deflection
-            projectile.setSecondsOnFire(2);
-
-            // Spawn some particles at deflection point
-            if (projectile.level() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
-                Vec3 deflectPos = projectile.position();
-                serverLevel.sendParticles(
-                        net.minecraft.core.particles.ParticleTypes.ELECTRIC_SPARK,
-                        deflectPos.x, deflectPos.y, deflectPos.z,
-                        5, // count
-                        0.2, 0.2, 0.2, // spread
-                        0.1 // speed
-                );
-            }
-        }
-
-        /**
-         * Applies damage and knockback to an entity hit by the laser
-         */
         private void applyLaserEffects(LivingEntity target, Vec3 laserStart, Vec3 laserEnd) {
             // Create damage source
-            DamageSource damageSource = owner.damageSources().playerAttack(owner);
+            DamageSource damageSource;
+            if (owner instanceof Player player) {
+                damageSource = owner.damageSources().playerAttack(player);
+            } else {
+                damageSource = owner.damageSources().mobAttack(owner);
+            }
 
-            // Apply damage
             target.hurt(damageSource, LASER_DAMAGE);
 
-            // Calculate and apply knockback
             Vec3 targetCenter = getEntityCenter(target);
             Vec3 knockbackDirection = targetCenter.subtract(laserStart).normalize();
 
-            // Apply horizontal knockback (similar to how vanilla knockback works)
             double horizontalStrength = LASER_KNOCKBACK_STRENGTH;
-            double verticalStrength = LASER_KNOCKBACK_STRENGTH * 0.4; // Reduced vertical component
+            double verticalStrength = LASER_KNOCKBACK_STRENGTH * 0.4;
 
             Vec3 knockback = new Vec3(
                     knockbackDirection.x * horizontalStrength,
-                    Math.max(0.1, knockbackDirection.y * verticalStrength + 0.1), // Always lift slightly
+                    Math.max(0.1, knockbackDirection.y * verticalStrength + 0.1),
                     knockbackDirection.z * horizontalStrength
             );
 
-            // Apply the knockback
             target.setDeltaMovement(target.getDeltaMovement().add(knockback));
-            target.hurtMarked = true; // Mark for velocity sync
+            target.hurtMarked = true;
 
-            // Add some visual flair - make the target glow briefly
-            target.setSecondsOnFire(1); // Brief fire effect for visual feedback
+            target.setSecondsOnFire(1);
         }
 
-        /**
-         * Result of a piercing laser trace
-         */
         private static class LaserResult {
             final Vec3 endPoint;
             final List<LivingEntity> hitEntities;
@@ -445,11 +444,35 @@ public class StaffOfEyesItem extends Item {
             List<LivingEntity> list = owner.level().getEntitiesOfClass(LivingEntity.class,
                     owner.getBoundingBox().inflate(radius),
                     e -> e != owner && !e.isRemoved() && e.getHealth() > 0.0F && !e.isInvulnerable());
+
             for (LivingEntity le : list) {
-                double d2 = le.distanceToSqr(owner);
-                if (d2 < best) { best = d2; bestE = le; }
+                // Additional check for hostile behavior - mobs won't target their own kind typically
+                if (owner instanceof Player || shouldTargetEntity(owner, le)) {
+                    double d2 = le.distanceToSqr(owner);
+                    if (d2 < best) {
+                        best = d2;
+                        bestE = le;
+                    }
+                }
             }
             return bestE;
+        }
+
+        /**
+         * Determines if the owner should target the given entity
+         */
+        private boolean shouldTargetEntity(LivingEntity owner, LivingEntity target) {
+            if (owner instanceof Player) {
+                return true; // Players can target anything
+            }
+
+            // For mobs, use basic hostile logic
+            if (target instanceof Player) {
+                return true; // Mobs generally hostile to players
+            }
+
+            // Check if they're different types
+            return !owner.getClass().equals(target.getClass());
         }
 
         private void sendRenderPacket() {
@@ -458,7 +481,20 @@ public class StaffOfEyesItem extends Item {
                 entries.add(new EyeRenderPacket.EyeEntry(e.offset, e.firing, e.laserEnd, e.look, -1, e.isBlinking, e.blinkPhase));
             }
             EyeRenderPacket pkt = new EyeRenderPacket(owner.getId(), entries);
-            ModNetworking.CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> owner), pkt);
+
+            if (owner.level() instanceof net.minecraft.server.level.ServerLevel) {
+                ModNetworking.CHANNEL.send(
+                        PacketDistributor.TRACKING_ENTITY.with(() -> owner),
+                        pkt
+                );
+                // Also send to the owner if it's a player
+                if (owner instanceof ServerPlayer serverPlayer) {
+                    ModNetworking.CHANNEL.send(
+                            PacketDistributor.PLAYER.with(() -> serverPlayer),
+                            pkt
+                    );
+                }
+            }
         }
 
         private static final class Eye {
@@ -470,14 +506,11 @@ public class StaffOfEyesItem extends Item {
             int fireCooldown = 0;
             int aimTicks = 0;
 
-            // Individual targeting
             LivingEntity currentTarget = null;
 
-            // Orbital system
             int orbitalRing = 0;
             double orbitalAngle = 0.0;
 
-            // Enhanced blinking
             int blinkCooldown = 60;
             boolean isBlinking = false;
             float blinkPhase = 0.0f;
