@@ -104,16 +104,11 @@ public final class BlackHoleRenderer {
         float jetLength = size * JET_LENGTH_MULTIPLIER;
         float jetWidth = size * JET_WIDTH_MULTIPLIER;
 
-        // Create rotation transform for the disk
-        VectorRenderer.Transform diskTransform = VectorRenderer.Transform.fromEuler(
-                Vec3.ZERO, rotation * 57.2958f, 0f, 0f, 1.0f, Vec3.ZERO
-        );
-
         // Render components in order for proper depth and blending
         renderOuterGlow(pos, accretionOuterRadius * 1.5f, time);
-        renderMagneticFieldLines(pos, accretionInnerRadius, accretionOuterRadius, rotation, time, diskTransform);
+        renderMagneticFieldLines(pos, accretionInnerRadius, accretionOuterRadius, rotation, time);
         renderPolarJets(pos, eventHorizonRadius, jetLength, jetWidth, rotation, time);
-        renderAccretionDisk(pos, accretionInnerRadius, accretionOuterRadius, rotation, time, diskTransform, camPos);
+        renderAccretionDisk(pos, accretionInnerRadius, accretionOuterRadius, rotation, time, camPos);
         renderGravitationalLensing(pos, photonSphereRadius, eventHorizonRadius, time, camPos);
         renderEventHorizon(pos, eventHorizonRadius);
         renderInnerGlow(pos, eventHorizonRadius, photonSphereRadius, time);
@@ -125,7 +120,7 @@ public final class BlackHoleRenderer {
     }
 
     private static void renderGravitationalLensing(Vec3 center, float photonSphereRadius, float eventHorizonRadius, float time, Vec3 camPos) {
-        // Main bright photon sphere ring (like Image 2)
+        // Main bright photon sphere ring (like Image 2) - make it semi-transparent
         List<Vec3> photonRing = new ArrayList<>();
         for (int i = 0; i <= 64; i++) {
             float angle = i * (float)Math.PI * 2.0f / 64.0f;
@@ -145,13 +140,14 @@ public final class BlackHoleRenderer {
             photonRing.add(center.add(point));
         }
 
-        // Bright main lensing ring
-        VectorRenderer.drawPolylineWorld(photonRing, COLOR_PHOTON_SPHERE, photonSphereRadius * 0.15f, false, 1, VectorRenderer.Transform.IDENTITY);
+        // Make main lensing ring semi-transparent instead of fully opaque
+        int semiTransparentPhotonColor = adjustColorAlpha(COLOR_PHOTON_SPHERE, 0.8f);
+        VectorRenderer.drawPolylineWorld(photonRing, semiTransparentPhotonColor, photonSphereRadius * 0.15f, false, 1, VectorRenderer.Transform.IDENTITY);
 
-        // Additional fainter lensing rings
+        // Additional fainter lensing rings with better transparency
         for (int ring = 1; ring <= LENSING_RINGS; ring++) {
             float ringRadius = photonSphereRadius * (0.7f + ring * 0.15f);
-            float alpha = 0.6f / ring;
+            float alpha = Math.max(0.1f, 0.6f / ring); // Ensure minimum visibility
             int ringColor = adjustColorAlpha(COLOR_LENSING_RING, alpha);
 
             List<Vec3> lensingRing = new ArrayList<>();
@@ -172,7 +168,7 @@ public final class BlackHoleRenderer {
     }
 
     private static void renderAccretionDisk(Vec3 center, float innerRadius, float outerRadius,
-                                            float rotation, float time, VectorRenderer.Transform transform, Vec3 camPos) {
+                                            float rotation, float time, Vec3 camPos) {
         // Multi-layered accretion disk with realistic temperature gradient
         for (int ring = 0; ring < ACCRETION_DISK_RINGS; ring++) {
             float ringProgress = ring / (float)(ACCRETION_DISK_RINGS - 1);
@@ -201,16 +197,17 @@ public final class BlackHoleRenderer {
             float brightness = (1.2f - ringProgress * 0.4f) * (1f + (float)Math.sin(time * 2f + ring * 0.3f) * 0.15f);
             color = adjustColorBrightness(color, brightness);
 
-            // Create spiral structure with turbulence
+            // Create spiral structure with turbulence - points are already in world space
             List<Vec3> diskRing = createAccretionRing(center, radius, rotation, time, ring);
 
             float thickness = (outerRadius - innerRadius) / ACCRETION_DISK_RINGS * 0.7f;
-            VectorRenderer.drawPolylineWorld(diskRing, color, thickness, false, 1, transform);
+            // Use IDENTITY transform since points are already in correct world positions
+            VectorRenderer.drawPolylineWorld(diskRing, color, thickness, false, 1, VectorRenderer.Transform.IDENTITY);
 
             // Add glow layer for bright inner rings
             if (ringProgress < 0.5f) {
                 int glowColor = adjustColorAlpha(color, 0.3f);
-                VectorRenderer.drawPolylineWorld(diskRing, glowColor, thickness * 2.5f, false, 1, transform);
+                VectorRenderer.drawPolylineWorld(diskRing, glowColor, thickness * 2.5f, false, 1, VectorRenderer.Transform.IDENTITY);
             }
         }
     }
@@ -221,33 +218,73 @@ public final class BlackHoleRenderer {
         for (int pole = 0; pole < 2; pole++) {
             float direction = pole == 0 ? 1.0f : -1.0f;
 
-            // Create jet path with helical structure
-            List<Vec3> jetPath = new ArrayList<>();
+            // Create multiple jet streams for smooth edges
+            int numStreams = 8; // Number of helical streams
+
+            for (int stream = 0; stream < numStreams; stream++) {
+                float streamOffset = stream * (float)Math.PI * 2.0f / numStreams;
+
+                // Create jet path with helical structure
+                List<Vec3> jetPath = new ArrayList<>();
+                for (int i = 0; i <= JET_SEGMENTS; i++) {
+                    float t = i / (float)JET_SEGMENTS;
+                    float y = direction * t * jetLength;
+
+                    // Jet expansion with distance
+                    float expansion = 1f + t * 2f;
+                    float helixRadius = jetWidth * expansion * 0.2f;
+
+                    // Multiple helical components with phase offset
+                    float helixAngle = t * (float)Math.PI * 6f + rotation * 2f + time * 3f + streamOffset;
+                    float x = helixRadius * (float)Math.cos(helixAngle);
+                    float z = helixRadius * (float)Math.sin(helixAngle);
+
+                    jetPath.add(center.add(new Vec3(x, y, z)));
+                }
+
+                // Stream intensity based on distance from center
+                float streamIntensity = 1.0f - (stream / (float)numStreams) * 0.6f;
+
+                // Core bright stream
+                int coreColor = adjustColorAlpha(COLOR_JET_BRIGHT, streamIntensity * 0.9f);
+                VectorRenderer.drawPolylineWorld(jetPath, coreColor, jetWidth * 0.3f * streamIntensity, false, 1, VectorRenderer.Transform.IDENTITY);
+            }
+
+            // Add central core beam
+            List<Vec3> coreJetPath = new ArrayList<>();
             for (int i = 0; i <= JET_SEGMENTS; i++) {
                 float t = i / (float)JET_SEGMENTS;
                 float y = direction * t * jetLength;
 
-                // Jet expansion with distance
-                float expansion = 1f + t * 2f;
-                float helixRadius = jetWidth * expansion * 0.3f;
+                // Slight wobble for the core
+                float wobble = (float)Math.sin(t * Math.PI * 3f + time * 4f) * jetWidth * 0.1f;
+                float x = wobble * (float)Math.cos(rotation + time);
+                float z = wobble * (float)Math.sin(rotation + time);
 
-                // Helical motion
-                float helixAngle = t * (float)Math.PI * 8f + rotation * 2f + time * 3f;
-                float x = helixRadius * (float)Math.cos(helixAngle);
-                float z = helixRadius * (float)Math.sin(helixAngle);
-
-                jetPath.add(center.add(new Vec3(x, y, z)));
+                coreJetPath.add(center.add(new Vec3(x, y, z)));
             }
 
-            // Multiple jet components for depth
-            VectorRenderer.drawPolylineWorld(jetPath, COLOR_JET_BRIGHT, jetWidth * 0.8f, false, 1, VectorRenderer.Transform.IDENTITY);
-            VectorRenderer.drawPolylineWorld(jetPath, adjustColorAlpha(COLOR_JET_MID, 0.7f), jetWidth * 1.5f, false, 1, VectorRenderer.Transform.IDENTITY);
-            VectorRenderer.drawPolylineWorld(jetPath, adjustColorAlpha(COLOR_JET_FAINT, 0.4f), jetWidth * 2.2f, false, 1, VectorRenderer.Transform.IDENTITY);
+            // Render layered core for smooth falloff
+            for (int layer = 0; layer < 5; layer++) {
+                float layerAlpha = (5 - layer) / 5.0f * 0.6f;
+                float layerWidth = jetWidth * (0.8f + layer * 0.4f);
+                int layerColor;
+
+                switch (layer) {
+                    case 0: layerColor = adjustColorAlpha(COLOR_JET_BRIGHT, layerAlpha); break;
+                    case 1: layerColor = adjustColorAlpha(COLOR_JET_BRIGHT, layerAlpha * 0.8f); break;
+                    case 2: layerColor = adjustColorAlpha(COLOR_JET_MID, layerAlpha * 0.6f); break;
+                    case 3: layerColor = adjustColorAlpha(COLOR_JET_MID, layerAlpha * 0.4f); break;
+                    default: layerColor = adjustColorAlpha(COLOR_JET_FAINT, layerAlpha * 0.3f); break;
+                }
+
+                VectorRenderer.drawPolylineWorld(coreJetPath, layerColor, layerWidth, false, 1, VectorRenderer.Transform.IDENTITY);
+            }
         }
     }
 
     private static void renderMagneticFieldLines(Vec3 center, float innerRadius, float outerRadius,
-                                                 float rotation, float time, VectorRenderer.Transform transform) {
+                                                 float rotation, float time) {
         // Magnetic field lines extending from the accretion disk
         for (int field = 0; field < MAGNETIC_FIELD_LINES; field++) {
             float fieldAngle = field * (float)Math.PI * 2.0f / MAGNETIC_FIELD_LINES + rotation * 0.5f;
@@ -276,7 +313,7 @@ public final class BlackHoleRenderer {
             float fieldStrength = (float)Math.sin(time + field * 0.5f) * 0.3f + 0.7f;
             int fieldColor = adjustColorAlpha(COLOR_MAGNETIC_FIELD, fieldStrength * 0.4f);
 
-            VectorRenderer.drawPolylineWorld(fieldLine, fieldColor, innerRadius * 0.02f, false, 1, transform);
+            VectorRenderer.drawPolylineWorld(fieldLine, fieldColor, innerRadius * 0.02f, false, 1, VectorRenderer.Transform.IDENTITY);
         }
     }
 
@@ -305,28 +342,28 @@ public final class BlackHoleRenderer {
     }
 
     private static void renderInnerGlow(Vec3 center, float eventHorizonRadius, float photonSphereRadius, float time) {
-        // Bright glow just outside the event horizon
-        for (int i = 0; i < 6; i++) {
-            float glowRadius = eventHorizonRadius * (1.05f + i * 0.08f);
+        // Much more subtle inner glow - reduce layers and opacity
+        for (int i = 0; i < 3; i++) {  // Reduced from 6 to 3 layers
+            float glowRadius = eventHorizonRadius * (1.05f + i * 0.06f);
             if (glowRadius > photonSphereRadius * 0.9f) break;
 
-            float alpha = 0.8f / (i + 1);
+            float alpha = 0.2f / (i + 1);  // Much lower alpha (was 0.8f)
             int glowColor = adjustColorAlpha(COLOR_INNER_GLOW, alpha);
 
             List<Vec3> innerGlow = new ArrayList<>();
-            for (int j = 0; j <= 48; j++) {
-                float angle = j * (float)Math.PI * 2.0f / 48.0f;
-                float fluctuation = 1f + (float)Math.sin(angle * 8f + time * 4f) * 0.08f;
+            for (int j = 0; j <= 24; j++) {  // Reduced segments for performance
+                float angle = j * (float)Math.PI * 2.0f / 24.0f;
+                float fluctuation = 1f + (float)Math.sin(angle * 6f + time * 3f) * 0.04f;  // Reduced fluctuation
 
                 Vec3 point = new Vec3(
                         Math.cos(angle) * glowRadius * fluctuation,
-                        (float)Math.sin(angle * 12f + time * 6f) * glowRadius * 0.03f,
+                        (float)Math.sin(angle * 8f + time * 4f) * glowRadius * 0.02f,  // Reduced height variation
                         Math.sin(angle) * glowRadius * fluctuation
                 );
                 innerGlow.add(center.add(point));
             }
 
-            VectorRenderer.drawPolylineWorld(innerGlow, glowColor, glowRadius * 0.2f, false, 1, VectorRenderer.Transform.IDENTITY);
+            VectorRenderer.drawPolylineWorld(innerGlow, glowColor, glowRadius * 0.1f, false, 1, VectorRenderer.Transform.IDENTITY);  // Reduced thickness
         }
     }
 
@@ -346,42 +383,18 @@ public final class BlackHoleRenderer {
 
             float adjustedRadius = radius * (1f + spiral1 + spiral2) + turbulence;
 
-            // Vertical structure from hydrostatic equilibrium
-            float scaleHeight = radius * 0.03f * (1f + (float)Math.sin(angle * 5f + time * 2f) * 0.5f);
+            // Vertical structure from hydrostatic equilibrium - keep this small for a flat disk
+            float scaleHeight = radius * 0.01f * (1f + (float)Math.sin(angle * 5f + time * 2f) * 0.2f);
 
             Vec3 point = new Vec3(
                     Math.cos(angle) * adjustedRadius,
-                    scaleHeight,
+                    scaleHeight, // Keep this small so disk stays mostly flat
                     Math.sin(angle) * adjustedRadius
             );
-            points.add(center.add(point));
+            points.add(center.add(point)); // Add center offset here to get world position
         }
 
         return points;
-    }
-
-    private static void renderBrightGlow(Vec3 center, float radius, float time) {
-        // Additional bright glow effect around the entire black hole
-        for (int layer = 0; layer < 3; layer++) {
-            float glowRadius = radius * (0.3f + layer * 0.2f);
-            float alpha = 0.6f / (layer + 1);
-            int brightGlow = adjustColorAlpha(COLOR_INNER_GLOW, alpha);
-
-            List<Vec3> brightRing = new ArrayList<>();
-            for (int i = 0; i <= 32; i++) {
-                float angle = i * (float)Math.PI * 2.0f / 32.0f;
-                float intensity = 1f + (float)Math.sin(time * 3f + angle * 4f) * 0.2f;
-
-                Vec3 point = new Vec3(
-                        Math.cos(angle) * glowRadius * intensity,
-                        (float)Math.sin(angle * 8f + time * 4f) * glowRadius * 0.1f,
-                        Math.sin(angle) * glowRadius * intensity
-                );
-                brightRing.add(center.add(point));
-            }
-
-            VectorRenderer.drawPolylineWorld(brightRing, brightGlow, glowRadius * 0.8f, false, 1, VectorRenderer.Transform.IDENTITY);
-        }
     }
 
     // Utility methods
