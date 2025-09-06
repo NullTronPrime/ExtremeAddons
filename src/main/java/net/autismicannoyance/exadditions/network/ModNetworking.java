@@ -29,9 +29,12 @@ public final class ModNetworking {
         CHANNEL.registerMessage(id(), EyeRenderPacket.class,
                 EyeRenderPacket::encode, EyeRenderPacket::decode, EyeRenderPacket::handle);
 
-
         // Eye effect packet - send from server to clients to spawn the visual eyes
         CHANNEL.registerMessage(id(), EyeEffectPacket.class,
                 EyeEffectPacket::encode, EyeEffectPacket::decode, EyeEffectPacket::handle);
+
+        // Black hole effect packet - send from server to clients to spawn black hole visuals
+        CHANNEL.registerMessage(id(), BlackHoleEffectPacket.class,
+                BlackHoleEffectPacket::encode, BlackHoleEffectPacket::decode, BlackHoleEffectPacket::handle);
     }
 }

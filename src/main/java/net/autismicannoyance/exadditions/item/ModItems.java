@@ -1,4 +1,5 @@
 package net.autismicannoyance.exadditions.item;
+
 import net.autismicannoyance.exadditions.ExAdditions;
 import net.autismicannoyance.exadditions.item.custom.*;
 import net.minecraft.world.item.*;
@@ -100,7 +101,9 @@ public class ModItems {
     public static final RegistryObject<Item> TESTEYE = ITEMS.register("test_eye",
             () -> new EyeTestItem(new Item.Properties()));
     public static final RegistryObject<Item> EYE_STAFF = ITEMS.register("eye_staff",
-            () -> new StaffOfEyesItem(new Item.Properties()));
+            () -> new StaffOfEyesItem(new Item.Properties().stacksTo(1)));
+    public static final RegistryObject<Item> BLACK_HOLE_SUMMONER = ITEMS.register("black_hole_summoner",
+            () -> new BlackHoleGeneratorItem(new Item.Properties().stacksTo(1)));
 
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);
