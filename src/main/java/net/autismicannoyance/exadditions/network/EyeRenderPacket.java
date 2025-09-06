@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Server -> client packet with per-eye offsets (relative to owner), firing flag, laser end, and look direction.
+ * Enhanced server -> client packet with per-eye data including blinking state
  */
 public final class EyeRenderPacket {
     public final int entityId;
@@ -51,7 +51,12 @@ public final class EyeRenderPacket {
             }
 
             int hitEntityId = buf.readInt(); // -1 = none
-            list.add(new EyeEntry(new Vec3(ox, oy, oz), firing, end, lookDir, hitEntityId));
+
+            // Enhanced blinking data
+            boolean isBlinking = buf.readBoolean();
+            float blinkPhase = buf.readFloat(); // 0.0 to 1.0
+
+            list.add(new EyeEntry(new Vec3(ox, oy, oz), firing, end, lookDir, hitEntityId, isBlinking, blinkPhase));
         }
         return new EyeRenderPacket(id, list);
     }
@@ -84,6 +89,10 @@ public final class EyeRenderPacket {
             }
 
             buf.writeInt(e.hitEntityId);
+
+            // Enhanced blinking data
+            buf.writeBoolean(e.isBlinking);
+            buf.writeFloat(e.blinkPhase);
         }
     }
 
@@ -103,13 +112,22 @@ public final class EyeRenderPacket {
         public final Vec3 laserEnd; // nullable
         public final Vec3 lookDirection; // nullable - direction the eye should face
         public final int hitEntityId; // -1 if none
+        public final boolean isBlinking; // synchronized blinking state
+        public final float blinkPhase; // 0.0 to 1.0 blink animation progress
 
-        public EyeEntry(Vec3 offset, boolean firing, Vec3 laserEnd, Vec3 lookDirection, int hitEntityId) {
+        public EyeEntry(Vec3 offset, boolean firing, Vec3 laserEnd, Vec3 lookDirection, int hitEntityId, boolean isBlinking, float blinkPhase) {
             this.offset = offset == null ? Vec3.ZERO : offset;
             this.firing = firing;
             this.laserEnd = laserEnd;
             this.lookDirection = lookDirection;
             this.hitEntityId = hitEntityId;
+            this.isBlinking = isBlinking;
+            this.blinkPhase = blinkPhase;
+        }
+
+        // Backward compatibility constructor
+        public EyeEntry(Vec3 offset, boolean firing, Vec3 laserEnd, Vec3 lookDirection, int hitEntityId) {
+            this(offset, firing, laserEnd, lookDirection, hitEntityId, false, 0.0f);
         }
     }
 }

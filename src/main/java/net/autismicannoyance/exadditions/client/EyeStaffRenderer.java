@@ -19,9 +19,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Merged EyeWatcher + blocky 3D laser renderer.
- * Uses server-provided per-eye offsets so lasers line up exactly.
- * Eyes now properly face their targets based on server-sent look direction.
+ * Enhanced EyeStaffRenderer with 3-orbital system, improved tracking, animated blinking,
+ * and front-facing outline visibility
  */
 @Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, value = Dist.CLIENT)
 public final class EyeStaffRenderer {
@@ -42,7 +41,6 @@ public final class EyeStaffRenderer {
     private static final int SEGMENTS = 160;
     private static final double OUTLINE_THICKNESS_FRACT = 0.075;
 
-    // keep short TTL so effects expire if server stops sending
     private static final int CLIENT_TTL = 40;
 
     /** Called by EyeRenderPacket.handle on client thread */
@@ -50,16 +48,16 @@ public final class EyeStaffRenderer {
         int ownerId = msg.entityId;
         List<net.autismicannoyance.exadditions.network.EyeRenderPacket.EyeEntry> entries = msg.eyes == null ? Collections.emptyList() : msg.eyes;
 
-        // create EyeEffectData sized to packet count but keep same class for drawing logic
         EyeEffectData data = new EyeEffectData(ownerId, Math.max(MIN_EYES, Math.min(MAX_EYES, entries.size())), CLIENT_TTL);
         data.eyes.clear();
         for (net.autismicannoyance.exadditions.network.EyeRenderPacket.EyeEntry e : entries) {
             EyeInstance inst = new EyeInstance();
-            inst.offset = e.offset == null ? Vec3.ZERO : e.offset; // server-provided offset for exactness
+            inst.offset = e.offset == null ? Vec3.ZERO : e.offset;
             inst.initialized = true;
             inst.width = 0.6f + RAND.nextFloat() * 0.9f;
             inst.height = inst.width * 0.45f;
 
+            // Enhanced pupil/iris tracking system
             inst.pupilOffset = Vec3.ZERO;
             inst.pupilTargetOffset = Vec3.ZERO;
             inst.pupilJitterTimer = 8 + RAND.nextInt(30);
@@ -69,12 +67,24 @@ public final class EyeStaffRenderer {
             inst.irisTarget = Vec3.ZERO;
             inst.irisTimer = 4 + RAND.nextInt(22);
 
-            // server-provided firing state / laser end
             inst.firing = e.firing;
             inst.laserEnd = e.laserEnd;
-
-            // server-provided look direction
             inst.lookDirection = e.lookDirection;
+
+            // Use server's blinking state if available (enhanced packet)
+            if (e instanceof net.autismicannoyance.exadditions.network.EyeRenderPacket.EyeEntry) {
+                try {
+                    // Try to access enhanced blinking fields via reflection or direct access
+                    java.lang.reflect.Field blinkingField = e.getClass().getField("isBlinking");
+                    java.lang.reflect.Field phaseField = e.getClass().getField("blinkPhase");
+                    inst.serverBlinking = blinkingField.getBoolean(e);
+                    inst.serverBlinkPhase = phaseField.getFloat(e);
+                } catch (Exception ex) {
+                    // Fallback to local blinking if server doesn't send blinking data
+                    inst.serverBlinking = false;
+                    inst.serverBlinkPhase = 0.0f;
+                }
+            }
 
             data.eyes.add(inst);
         }
@@ -114,10 +124,8 @@ public final class EyeStaffRenderer {
             data.ensureEyesInitialized(target, mc);
 
             for (EyeInstance inst : data.eyes) {
-                // base world position for this eye
                 Vec3 baseWorld = targetPos.add(inst.offset);
 
-                // inside block repositioning preserved (same as original)
                 if (isInsideBlock(mc, baseWorld)) {
                     inst.repositionTimer--;
                     if (inst.repositionTimer <= 0) {
@@ -127,54 +135,45 @@ public final class EyeStaffRenderer {
                     continue;
                 }
 
-                // blinking
-                if (inst.cooldown-- <= 0) {
-                    if (!inst.blinking && RAND.nextFloat() < 0.04f) {
-                        inst.blinking = true;
-                        inst.initialBlinkDuration = 8 + RAND.nextInt(8);
-                        inst.blinkTimer = inst.initialBlinkDuration;
-                    }
-                    inst.cooldown = 30 + RAND.nextInt(60);
-                }
-                if (inst.blinking) {
-                    inst.blinkTimer--;
-                    if (inst.blinkTimer <= 0) inst.blinking = false;
-                }
-                float blinkFraction = 0f;
-                if (inst.blinking) {
-                    float t = 1f - ((float) inst.blinkTimer / Math.max(1, inst.initialBlinkDuration));
-                    blinkFraction = (float) Math.sin(t * Math.PI);
+                // Use server-synchronized blinking if available, otherwise fall back to local
+                float blinkFraction;
+                if (inst.serverBlinking && inst.serverBlinkPhase > 0.0f) {
+                    blinkFraction = getSmoothedBlinkFraction(inst.serverBlinkPhase);
+                } else {
+                    // Keep local blinking as fallback
+                    updateAnimatedBlinking(inst);
+                    blinkFraction = getBlinkFraction(inst);
                 }
 
-                // NEW: Compute orientation quaternion based on server-provided look direction
+                // Compute orientation quaternion based on server-provided look direction
                 Quaternionf quat;
                 if (inst.lookDirection != null && inst.lookDirection.length() > 1e-6) {
-                    // Use server-provided look direction
                     Vector3f lookJ = new Vector3f((float) inst.lookDirection.x, (float) inst.lookDirection.y, (float) inst.lookDirection.z);
                     lookJ.normalize();
                     quat = new Quaternionf().rotationTo(new Vector3f(0f, 0f, 1f), lookJ);
                 } else {
-                    // Fallback - look at the player (owner)
                     Vec3 look = targetPos.subtract(baseWorld);
                     Vector3f lookJ = new Vector3f((float) look.x, (float) look.y, (float) look.z);
                     if (lookJ.length() > 1e-6f) {
                         lookJ.normalize();
                         quat = new Quaternionf().rotationTo(new Vector3f(0f, 0f, 1f), lookJ);
                     } else {
-                        quat = new Quaternionf(); // identity
+                        quat = new Quaternionf();
                     }
                 }
 
-                // animate iris/pupil jitter
-                animateIris(inst);
+                // Enhanced iris/pupil animation that responds to look direction
+                animateIrisWithTracking(inst, quat, mc.gameRenderer.getMainCamera().getPosition());
 
-                // draw eye with oval shape
-                drawEye(baseWorld, inst, quat, blinkFraction);
+                // Check if eye is facing camera for outline visibility
+                boolean facingCamera = isEyeFacingCamera(baseWorld, quat, mc.gameRenderer.getMainCamera().getPosition());
 
-                // draw blocky 3D laser if server flagged firing and sent laserEnd
+                // Draw eye with enhanced features
+                drawEye(baseWorld, inst, quat, blinkFraction, facingCamera);
+
+                // Draw laser beam if firing
                 if (inst.firing && inst.laserEnd != null) {
                     drawBlockyBeam(baseWorld, inst.laserEnd, 0.06f, COLOR_LASER);
-                    // small impact fill
                     VectorRenderer.drawFilledPolygonWorld(createCircleAt(inst.laserEnd, 0.06, 10), 0xFFFFCCCC, false, 6, VectorRenderer.Transform.IDENTITY);
                 }
             }
@@ -184,13 +183,86 @@ public final class EyeStaffRenderer {
         RenderSystem.disableBlend();
     }
 
-    /* ---------------- drawing helpers (modified for oval shape) ---------------- */
+    private static void updateAnimatedBlinking(EyeInstance inst) {
+        if (inst.cooldown-- <= 0) {
+            if (!inst.blinking && RAND.nextFloat() < 0.03f) {
+                inst.blinking = true;
+                inst.initialBlinkDuration = 6 + RAND.nextInt(12);
+                inst.blinkTimer = inst.initialBlinkDuration;
+            }
+            inst.cooldown = 40 + RAND.nextInt(100);
+        }
 
-    private static void drawEye(Vec3 baseWorld, EyeInstance inst, Quaternionf quat, float blinkFraction) {
+        if (inst.blinking) {
+            inst.blinkTimer--;
+            if (inst.blinkTimer <= 0) {
+                inst.blinking = false;
+            }
+        }
+    }
+
+    private static float getBlinkFraction(EyeInstance inst) {
+        if (!inst.blinking) return 0f;
+
+        float progress = 1f - ((float) inst.blinkTimer / Math.max(1, inst.initialBlinkDuration));
+        return getSmoothedBlinkFraction(progress);
+    }
+
+    private static float getSmoothedBlinkFraction(float progress) {
+        // Smooth blink animation - quick close, slower open
+        if (progress <= 0.3f) {
+            // Closing phase (0 to 0.3): rapid closure
+            return (float) Math.sin((progress / 0.3f) * Math.PI * 0.5);
+        } else {
+            // Opening phase (0.3 to 1.0): slower opening
+            float openProgress = (progress - 0.3f) / 0.7f;
+            return (float) (1.0 - Math.sin(openProgress * Math.PI * 0.5));
+        }
+    }
+
+    private static boolean isEyeFacingCamera(Vec3 eyePos, Quaternionf eyeRotation, Vec3 cameraPos) {
+        // Get the eye's forward vector (what it's looking at)
+        Vector3f forward = new Vector3f(0, 0, 1);
+        eyeRotation.transform(forward);
+
+        // Vector from eye to camera
+        Vec3 toCamera = cameraPos.subtract(eyePos).normalize();
+        Vector3f toCameraJ = new Vector3f((float) toCamera.x, (float) toCamera.y, (float) toCamera.z);
+
+        // Check if the eye's forward direction is roughly aligned with the camera direction
+        float dot = forward.dot(toCameraJ);
+        return dot > 0.3f; // Eye is facing towards camera if dot product > 0.3
+    }
+
+    private static void animateIrisWithTracking(EyeInstance inst, Quaternionf eyeRotation, Vec3 cameraPos) {
+        // Enhanced iris movement that responds to the eye's look direction
+        if (inst.irisTimer-- <= 0) {
+            double ang = RAND.nextDouble() * Math.PI * 2.0;
+            double r = RAND.nextDouble() * inst.pupilMaxOffset * 0.8;
+            inst.irisTarget = new Vec3(Math.cos(ang) * r, Math.sin(ang) * r, 0.0);
+            inst.irisTimer = 8 + RAND.nextInt(28);
+        }
+
+        // Smoother iris movement
+        Vec3 d = inst.irisTarget.subtract(inst.irisOffset);
+        inst.irisOffset = inst.irisOffset.add(d.scale(0.25));
+
+        // Enhanced pupil jitter with tracking influence
+        if (inst.pupilJitterTimer-- <= 0) {
+            double a = RAND.nextDouble() * Math.PI * 2.0;
+            double r = RAND.nextDouble() * inst.pupilCenterMaxOffset;
+            inst.pupilTargetOffset = new Vec3(Math.cos(a) * r, Math.sin(a) * r, 0.0);
+            inst.pupilJitterTimer = 12 + RAND.nextInt(24);
+        }
+
+        Vec3 pd = inst.pupilTargetOffset.subtract(inst.pupilOffset);
+        inst.pupilOffset = inst.pupilOffset.add(pd.scale(0.15));
+    }
+
+    private static void drawEye(Vec3 baseWorld, EyeInstance inst, Quaternionf quat, float blinkFraction, boolean facingCamera) {
         float width = inst.width;
-        float height = inst.height * (1f - blinkFraction * 0.92f);
+        float height = inst.height * (1f - blinkFraction * 0.95f); // More dramatic blink
 
-        // Create oval shape instead of almond
         List<Vec3> local = createOvalLocal(width, height, SEGMENTS);
         Vec3 centroidLocal = centroidLocal(local);
         Vec3 worldCentroid = baseWorld.add(rotateLocalByQuat(centroidLocal, quat));
@@ -206,26 +278,29 @@ public final class EyeStaffRenderer {
         Vec3 biasPupil = forward.scale(baseBias * 1.05);
         Vec3 biasIris = forward.scale(baseBias * 1.9);
 
-        // outline
-        int[] outlineCol = new int[]{COLOR_OUTLINE, COLOR_OUTLINE, COLOR_OUTLINE};
-        int n = local.size();
-        for (int i = 0; i < n; i++) {
-            Vec3 inA = local.get(i);
-            Vec3 inB = local.get((i + 1) % n);
-            Vec3 outA = outerLocal.get(i);
-            Vec3 outB = outerLocal.get((i + 1) % n);
+        // Only draw outline if eye is facing camera
+        if (facingCamera) {
+            int[] outlineCol = new int[]{COLOR_OUTLINE, COLOR_OUTLINE, COLOR_OUTLINE};
+            int n = local.size();
+            for (int i = 0; i < n; i++) {
+                Vec3 inA = local.get(i);
+                Vec3 inB = local.get((i + 1) % n);
+                Vec3 outA = outerLocal.get(i);
+                Vec3 outB = outerLocal.get((i + 1) % n);
 
-            Vec3 wOutA = baseWorld.add(rotateLocalByQuat(outA, quat)).add(biasOutline);
-            Vec3 wOutB = baseWorld.add(rotateLocalByQuat(outB, quat)).add(biasOutline);
-            Vec3 wInA = baseWorld.add(rotateLocalByQuat(inA, quat)).add(biasSclera);
-            Vec3 wInB = baseWorld.add(rotateLocalByQuat(inB, quat)).add(biasSclera);
+                Vec3 wOutA = baseWorld.add(rotateLocalByQuat(outA, quat)).add(biasOutline);
+                Vec3 wOutB = baseWorld.add(rotateLocalByQuat(outB, quat)).add(biasOutline);
+                Vec3 wInA = baseWorld.add(rotateLocalByQuat(inA, quat)).add(biasSclera);
+                Vec3 wInB = baseWorld.add(rotateLocalByQuat(inB, quat)).add(biasSclera);
 
-            VectorRenderer.drawPlaneWorld(wOutA, wOutB, wInB, outlineCol, true, 1, VectorRenderer.Transform.IDENTITY);
-            VectorRenderer.drawPlaneWorld(wOutA, wInB, wInA, outlineCol, true, 1, VectorRenderer.Transform.IDENTITY);
+                VectorRenderer.drawPlaneWorld(wOutA, wOutB, wInB, outlineCol, true, 1, VectorRenderer.Transform.IDENTITY);
+                VectorRenderer.drawPlaneWorld(wOutA, wInB, wInA, outlineCol, true, 1, VectorRenderer.Transform.IDENTITY);
+            }
         }
 
-        // sclera (fill the oval)
+        // Sclera (main eye body)
         int[] scleraCol = new int[]{COLOR_SCLERA, COLOR_SCLERA, COLOR_SCLERA};
+        int n = local.size();
         for (int i = 0; i < n; i++) {
             Vec3 a = local.get(i);
             Vec3 b = local.get((i + 1) % n);
@@ -234,10 +309,17 @@ public final class EyeStaffRenderer {
             VectorRenderer.drawPlaneWorld(worldCentroid, wa, wb, scleraCol, true, 1, VectorRenderer.Transform.IDENTITY);
         }
 
-        // pupil (oval shape)
+        // Enhanced pupil with better tracking
         float pupilRadius = Math.min(width, height) * 0.32f * (1f - blinkFraction);
         List<Vec3> pupilLocal = createOvalLocal(pupilRadius * 2, pupilRadius * 2, Math.max(20, SEGMENTS / 5));
-        Vec3 pupilCenterLocal = new Vec3(inst.pupilOffset.x, inst.pupilOffset.y, 0.0);
+
+        // Pupil follows look direction more accurately
+        Vec3 pupilCenterLocal = new Vec3(
+                inst.pupilOffset.x * (1f - blinkFraction),
+                inst.pupilOffset.y * (1f - blinkFraction),
+                0.0
+        );
+
         Vec3 worldPupilCenter = baseWorld.add(rotateLocalByQuat(pupilCenterLocal, quat)).add(biasPupil);
         int[] pupilCol = new int[]{COLOR_PUPIL, COLOR_PUPIL, COLOR_PUPIL};
         for (int i = 0; i < pupilLocal.size(); i++) {
@@ -248,10 +330,17 @@ public final class EyeStaffRenderer {
             VectorRenderer.drawPlaneWorld(worldPupilCenter, wa, wb, pupilCol, true, 1, VectorRenderer.Transform.IDENTITY);
         }
 
-        // iris (circular, kept the same)
+        // Enhanced iris with better tracking
         float irisRadius = Math.max(0.02f, pupilRadius * 0.20f);
         List<Vec3> irisLocal = createCircleLocal(irisRadius, 12);
-        Vec3 irisCenterLocal = new Vec3(inst.pupilOffset.x + inst.irisOffset.x, inst.pupilOffset.y + inst.irisOffset.y, 0.0);
+
+        // Iris also follows the look direction and pupil movement
+        Vec3 irisCenterLocal = new Vec3(
+                (inst.pupilOffset.x + inst.irisOffset.x) * (1f - blinkFraction * 0.5f),
+                (inst.pupilOffset.y + inst.irisOffset.y) * (1f - blinkFraction * 0.5f),
+                0.0
+        );
+
         Vec3 worldIrisCenter = baseWorld.add(rotateLocalByQuat(irisCenterLocal, quat)).add(biasIris);
         int[] irisCol = new int[]{COLOR_IRIS, COLOR_IRIS, COLOR_IRIS};
         for (int i = 0; i < irisLocal.size(); i++) {
@@ -263,9 +352,8 @@ public final class EyeStaffRenderer {
         }
     }
 
-    /* ---------------- geometry helpers (modified for oval) ---------------- */
+    /* ---------------- geometry helpers ---------------- */
 
-    // NEW: Create oval shape instead of almond
     private static List<Vec3> createOvalLocal(double width, double height, int segments) {
         List<Vec3> pts = new ArrayList<>(segments);
         for (int i = 0; i < segments; i++) {
@@ -337,7 +425,7 @@ public final class EyeStaffRenderer {
         double s_x = D.x - C.x;
         double s_y = D.y - C.y;
         double denom = r_x * s_y - r_y * s_x;
-        if (Math.abs(denom) < 1e-9) return null; // parallel
+        if (Math.abs(denom) < 1e-9) return null;
         double t = ((C.x - A.x) * s_y - (C.y - A.y) * s_x) / denom;
         return new Vec3(A.x + r_x * t, A.y + r_y * t, 0.0);
     }
@@ -357,29 +445,7 @@ public final class EyeStaffRenderer {
         return new Vec3(vin.x(), vin.y(), vin.z());
     }
 
-    /* ---------- animation helpers (unchanged) ---------- */
-
-    private static void animateIris(EyeInstance inst) {
-        if (inst.irisTimer-- <= 0) {
-            double ang = RAND.nextDouble() * Math.PI * 2.0;
-            double r = RAND.nextDouble() * inst.pupilMaxOffset;
-            inst.irisTarget = new Vec3(Math.cos(ang) * r, Math.sin(ang) * r, 0.0);
-            inst.irisTimer = 6 + RAND.nextInt(36);
-        }
-        Vec3 d = inst.irisTarget.subtract(inst.irisOffset);
-        inst.irisOffset = inst.irisOffset.add(d.scale(0.18));
-
-        if (inst.pupilJitterTimer-- <= 0) {
-            double a = RAND.nextDouble() * Math.PI * 2.0;
-            double r = RAND.nextDouble() * inst.pupilCenterMaxOffset;
-            inst.pupilTargetOffset = new Vec3(Math.cos(a) * r, Math.sin(a) * r, 0.0);
-            inst.pupilJitterTimer = 18 + RAND.nextInt(36);
-        }
-        Vec3 pd = inst.pupilTargetOffset.subtract(inst.pupilOffset);
-        inst.pupilOffset = inst.pupilOffset.add(pd.scale(0.12));
-    }
-
-    /* ---------- placement helpers (unchanged) ---------- */
+    /* ---------- placement helpers ---------- */
 
     private static Vec3 pickOffsetAroundTarget(LivingEntity target, Minecraft mc) {
         for (int tries = 0; tries < 50; tries++) {
@@ -403,7 +469,6 @@ public final class EyeStaffRenderer {
         return !s.isAir() && !s.getCollisionShape(mc.level, bp).isEmpty();
     }
 
-    /* ---------- helper to create small circle around point (world coords) ---------- */
     private static List<Vec3> createCircleAt(Vec3 center, double radius, int segments) {
         List<Vec3> pts = new ArrayList<>(segments);
         for (int i = 0; i < segments; i++) {
@@ -414,21 +479,17 @@ public final class EyeStaffRenderer {
     }
 
     /* ---------- BLOCKY BEAM DRAWER ---------- */
-    // draw a rectangular prism between start and end. halfWidth controls thickness.
     private static void drawBlockyBeam(Vec3 start, Vec3 end, float halfWidth, int colorArgb) {
-        // compute basis
         Vec3 dir = end.subtract(start);
         if (dir.length() <= 1e-6) return;
         Vec3 forward = dir.normalize();
         Vec3 up = new Vec3(0, 1, 0);
-        // if forward is nearly parallel to up, pick another up
         if (Math.abs(forward.dot(up)) > 0.999) up = new Vec3(1, 0, 0);
         Vec3 right = forward.cross(up);
         if (right.length() <= 1e-6) return;
         right = right.normalize().scale(halfWidth);
         Vec3 realUp = right.cross(forward).normalize().scale(halfWidth);
 
-        // 8 corners: s +/- right +/- up, e +/- right +/- up
         Vec3 s1 = start.add(right).add(realUp);
         Vec3 s2 = start.add(right).subtract(realUp);
         Vec3 s3 = start.subtract(right).subtract(realUp);
@@ -441,27 +502,24 @@ public final class EyeStaffRenderer {
 
         int[] col = new int[]{colorArgb, colorArgb, colorArgb};
 
-        // draw 4 side faces (each as two triangles)
+        // Draw 4 side faces
         VectorRenderer.drawPlaneWorld(s1, e1, e2, col, true, 1, VectorRenderer.Transform.IDENTITY);
         VectorRenderer.drawPlaneWorld(s1, e2, s2, col, true, 1, VectorRenderer.Transform.IDENTITY);
-
         VectorRenderer.drawPlaneWorld(s2, e2, e3, col, true, 1, VectorRenderer.Transform.IDENTITY);
         VectorRenderer.drawPlaneWorld(s2, e3, s3, col, true, 1, VectorRenderer.Transform.IDENTITY);
-
         VectorRenderer.drawPlaneWorld(s3, e3, e4, col, true, 1, VectorRenderer.Transform.IDENTITY);
         VectorRenderer.drawPlaneWorld(s3, e4, s4, col, true, 1, VectorRenderer.Transform.IDENTITY);
-
         VectorRenderer.drawPlaneWorld(s4, e4, e1, col, true, 1, VectorRenderer.Transform.IDENTITY);
         VectorRenderer.drawPlaneWorld(s4, e1, s1, col, true, 1, VectorRenderer.Transform.IDENTITY);
 
-        // cap ends (optional: small translucent caps)
+        // Cap ends
         VectorRenderer.drawPlaneWorld(s1, s2, s3, col, true, 1, VectorRenderer.Transform.IDENTITY);
         VectorRenderer.drawPlaneWorld(s1, s3, s4, col, true, 1, VectorRenderer.Transform.IDENTITY);
         VectorRenderer.drawPlaneWorld(e1, e3, e2, col, true, 1, VectorRenderer.Transform.IDENTITY);
         VectorRenderer.drawPlaneWorld(e1, e4, e3, col, true, 1, VectorRenderer.Transform.IDENTITY);
     }
 
-    /* ---------- data ---------- */
+    /* ---------- data classes ---------- */
     private static final class EyeEffectData {
         final int entityId;
         final int lifetime;
@@ -475,11 +533,8 @@ public final class EyeStaffRenderer {
         }
 
         void ensureEyesInitialized(LivingEntity target, Minecraft mc) {
-            // Server now handles all positioning, so this is mostly unnecessary
-            // but keep for any client-only animation state that wasn't sent from server
             for (EyeInstance inst : eyes) {
                 if (!inst.initialized) {
-                    // These should already be set from handlePacket, but just in case:
                     inst.initialized = true;
                 }
             }
@@ -493,11 +548,13 @@ public final class EyeStaffRenderer {
         float height = 0.3f;
         int repositionTimer = 0;
 
+        // Enhanced blinking system (local fallback)
         boolean blinking = false;
         int blinkTimer = 0;
         int initialBlinkDuration = 8;
         int cooldown = 30;
 
+        // Enhanced tracking system
         Vec3 pupilOffset = Vec3.ZERO;
         Vec3 pupilTargetOffset = Vec3.ZERO;
         int pupilJitterTimer = 0;
@@ -508,9 +565,13 @@ public final class EyeStaffRenderer {
         Vec3 irisTarget = Vec3.ZERO;
         int irisTimer = 0;
 
-        // server-driven laser state
+        // Server-driven state
         boolean firing = false;
         Vec3 laserEnd = null;
-        Vec3 lookDirection = null; // where the eye should be looking
+        Vec3 lookDirection = null;
+
+        // Server-synchronized blinking (when available)
+        boolean serverBlinking = false;
+        float serverBlinkPhase = 0.0f; // 0.0 to 1.0 from server
     }
 }

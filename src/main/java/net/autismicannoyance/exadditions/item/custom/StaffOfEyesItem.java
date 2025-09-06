@@ -21,11 +21,7 @@ import net.minecraftforge.network.PacketDistributor;
 import java.util.*;
 
 /**
- * StaffOfEyes item with merged server-side EyeController.
- * - max 10 eyes
- * - fixed offsets when locked (<= 8 blocks), eyes rotate in place to face the target
- * - server-side raytrace; damage credited to player
- * - ONLY uses EyeStaffRenderer (shooting eyes), not EyeWatcherRenderer
+ * Enhanced StaffOfEyes with 3-orbital idle system and improved eye tracking
  */
 public class StaffOfEyesItem extends Item {
     public StaffOfEyesItem(Properties props) { super(props); }
@@ -49,14 +45,19 @@ public class StaffOfEyesItem extends Item {
         private static final Random RAND = new Random();
 
         // tuning
-        private static final int MAX_EYES = 10;            // cap at 10
-        private static final double LOCK_DISTANCE = 12.0;  // increased lock distance
-        private static final double SEARCH_RADIUS = 16.0;  // search radius for targets
-        private static final int PACKET_INTERVAL = 2;      // faster updates for smoother rotation
-        private static final float LASER_DAMAGE = 4.0f;    // damage per hit
-        private static final int AIM_THRESHOLD = 5;        // reduced aim time
-        private static final int FIRE_COOLDOWN_MIN = 15;   // per-eye cooldown min
-        private static final int FIRE_COOLDOWN_MAX = 30;   // per-eye cooldown max
+        private static final int MAX_EYES = 15;
+        private static final double LOCK_DISTANCE = 12.0;
+        private static final double SEARCH_RADIUS = 16.0;
+        private static final int PACKET_INTERVAL = 2;
+        private static final float LASER_DAMAGE = 4.0f;
+        private static final int AIM_THRESHOLD = 5;
+        private static final int FIRE_COOLDOWN_MIN = 15;
+        private static final int FIRE_COOLDOWN_MAX = 30;
+
+        // orbital system constants
+        private static final double[] ORBITAL_RADII = {2.5, 3.8, 5.2}; // 3 orbital rings
+        private static final double[] ORBITAL_HEIGHTS = {0.8, 1.5, 2.2}; // different heights for each ring
+        private static final double[] ORBITAL_SPEEDS = {0.008, 0.006, 0.004}; // different speeds (rad/tick)
 
         private final ServerPlayer owner;
         private final List<Eye> eyes = new ArrayList<>();
@@ -65,18 +66,49 @@ public class StaffOfEyesItem extends Item {
         private EyeController(ServerPlayer owner) {
             this.owner = owner;
             int count = Math.min(MAX_EYES, 6 + RAND.nextInt(5)); // 6..10 eyes
+
+            // Distribute eyes across the 3 orbitals
             for (int i = 0; i < count; i++) {
                 Eye e = new Eye();
-                e.offset = pickInitialOffset(i, count);
+
+                // Assign orbital ring (distribute evenly)
+                e.orbitalRing = i % 3;
+
+                // Initial position on the orbital
+                double eyesInThisRing = Math.ceil(count / 3.0);
+                double angleStep = (Math.PI * 2.0) / eyesInThisRing;
+                double ringIndex = i / 3;
+                e.orbitalAngle = ringIndex * angleStep + RAND.nextDouble() * 0.5; // slight randomization
+
+                // Set initial offset based on orbital position
+                updateEyeOrbitalPosition(e);
+
                 e.width = 0.6f + RAND.nextFloat() * 0.9f;
                 e.height = e.width * 0.5f;
-                e.fireCooldown = RAND.nextInt(FIRE_COOLDOWN_MAX); // stagger initial cooldowns
+                e.fireCooldown = RAND.nextInt(FIRE_COOLDOWN_MAX);
                 e.aimTicks = 0;
+
+                // Enhanced blinking system
+                e.blinkCooldown = 60 + RAND.nextInt(120); // 3-9 seconds between blinks
+                e.isBlinking = false;
+                e.blinkPhase = 0.0f;
+                e.blinkSpeed = 0.15f + RAND.nextFloat() * 0.1f; // varied blink speeds
+
                 eyes.add(e);
             }
 
-            // Send initial packet to spawn the shooting eyes
             sendRenderPacket();
+        }
+
+        private void updateEyeOrbitalPosition(Eye eye) {
+            int ring = eye.orbitalRing;
+            double radius = ORBITAL_RADII[ring];
+            double height = ORBITAL_HEIGHTS[ring] + Math.sin(tick * 0.01 + eye.hashCode()) * 0.15; // gentle bobbing
+
+            double x = Math.cos(eye.orbitalAngle) * radius;
+            double z = Math.sin(eye.orbitalAngle) * radius;
+
+            eye.offset = new Vec3(x, height, z);
         }
 
         public static void ensure(ServerPlayer p) {
@@ -86,7 +118,6 @@ public class StaffOfEyesItem extends Item {
         public static void remove(ServerPlayer p) {
             EyeController removed = INSTANCES.remove(p.getUUID());
             if (removed != null) {
-                // Send empty packet to clear the eyes - need to pass empty list, not call old constructor
                 List<EyeRenderPacket.EyeEntry> emptyList = Collections.emptyList();
                 EyeRenderPacket clear = new EyeRenderPacket(p.getId(), emptyList);
                 ModNetworking.CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> p), clear);
@@ -120,7 +151,6 @@ public class StaffOfEyesItem extends Item {
             if (owner.isRemoved()) return;
             tick++;
 
-            // find nearest target within SEARCH_RADIUS
             LivingEntity target = findNearestTargetWithin(SEARCH_RADIUS);
 
             boolean locked = false;
@@ -130,23 +160,23 @@ public class StaffOfEyesItem extends Item {
             }
 
             for (Eye e : eyes) {
-                Vec3 eyeWorld = owner.position().add(e.offset);
+                // Update blinking animation
+                updateBlinking(e);
 
                 if (!locked || target == null) {
-                    // idle: slow orbit around player
-                    double ang = Math.atan2(e.offset.z, e.offset.x) + 0.005 * (0.8 + RAND.nextDouble() * 0.4);
-                    double r = Math.sqrt(e.offset.x * e.offset.x + e.offset.z * e.offset.z);
-                    // vary the radius slightly for more organic movement
-                    r += Math.sin(tick * 0.02 + e.hashCode()) * 0.1;
-                    r = Math.max(2.5, Math.min(6.0, r)); // clamp radius
-                    double y = e.offset.y + Math.sin(tick * 0.015 + e.hashCode()) * 0.05; // slight bobbing
-                    e.offset = new Vec3(Math.cos(ang) * r, y, Math.sin(ang) * r);
+                    // IDLE MODE: Orbital movement with player-facing
 
-                    // update eye world position after offset change
-                    eyeWorld = owner.position().add(e.offset);
+                    // Update orbital angle (each ring moves at different speeds)
+                    e.orbitalAngle += ORBITAL_SPEEDS[e.orbitalRing];
+                    if (e.orbitalAngle > Math.PI * 2.0) e.orbitalAngle -= Math.PI * 2.0;
 
-                    // look at player when idle
-                    Vec3 lookToPlayer = owner.position().add(0, owner.getBbHeight() * 0.5, 0).subtract(eyeWorld);
+                    // Update position on orbital
+                    updateEyeOrbitalPosition(e);
+
+                    // Always look at player center when idle
+                    Vec3 eyeWorld = owner.position().add(e.offset);
+                    Vec3 playerCenter = owner.position().add(0, owner.getBbHeight() * 0.5, 0);
+                    Vec3 lookToPlayer = playerCenter.subtract(eyeWorld);
                     if (lookToPlayer.length() > 1e-6) {
                         e.look = lookToPlayer.normalize();
                     }
@@ -155,26 +185,25 @@ public class StaffOfEyesItem extends Item {
                     e.firing = false;
                     e.laserEnd = null;
                 } else {
-                    // locked: maintain fixed offset relative to player, compute look vector to target center
+                    // LOCKED MODE: Fixed position, track target
+                    // Keep current orbital position but stop moving
+
+                    Vec3 eyeWorld = owner.position().add(e.offset);
                     Vec3 targetPos = new Vec3(target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ());
                     Vec3 dir = targetPos.subtract(eyeWorld);
                     if (dir.length() > 1e-6) e.look = dir.normalize();
 
-                    // charge/aim then fire if cooldown allows
                     if (e.fireCooldown > 0) e.fireCooldown--;
                     e.aimTicks++;
 
                     boolean canFire = e.aimTicks >= AIM_THRESHOLD && e.fireCooldown <= 0;
 
                     if (canFire) {
-                        // perform raytrace from eyeWorld towards targetPos
                         Vec3 hitPoint = targetPos;
                         boolean hitTarget = false;
 
-                        // 1) try entity hit (ProjectileUtil helper)
                         Vec3 start = eyeWorld;
                         Vec3 end = targetPos;
-                        // expand bbox slightly along path to catch thin entities
                         AABB searchBox = owner.getBoundingBox().expandTowards(end.subtract(start)).inflate(2.0);
                         EntityHitResult entResult = ProjectileUtil.getEntityHitResult(owner.level(), owner, start, end, searchBox,
                                 e2 -> (e2 instanceof LivingEntity) && !e2.isRemoved() && e2 != owner);
@@ -183,41 +212,53 @@ public class StaffOfEyesItem extends Item {
                             hitPoint = entResult.getLocation();
                             hitTarget = true;
                         } else {
-                            // 2) block hit check
                             ClipContext cc = new ClipContext(start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, owner);
                             BlockHitResult bhr = owner.level().clip(cc);
                             if (bhr != null && bhr.getType() == HitResult.Type.BLOCK) {
                                 hitPoint = bhr.getLocation();
                                 hitTarget = false;
                             } else {
-                                // clear shot to target
                                 hitPoint = targetPos;
                                 hitTarget = true;
                             }
                         }
 
-                        // apply damage only if we hit the target
                         if (hitTarget) {
                             target.hurt(owner.damageSources().playerAttack(owner), LASER_DAMAGE);
                         }
 
-                        // set firing state and laserEnd point
                         e.firing = true;
                         e.laserEnd = hitPoint;
-
-                        // reset cooldown and aimTicks
                         e.fireCooldown = FIRE_COOLDOWN_MIN + RAND.nextInt(FIRE_COOLDOWN_MAX - FIRE_COOLDOWN_MIN + 1);
                         e.aimTicks = 0;
                     } else {
-                        // still aiming, show charging effect
-                        e.firing = e.aimTicks > AIM_THRESHOLD / 2; // start "charging" effect halfway through aim
-                        e.laserEnd = null; // no beam while charging
+                        e.firing = e.aimTicks > AIM_THRESHOLD / 2;
+                        e.laserEnd = null;
                     }
                 }
             }
 
-            // send updates more frequently for smoother visuals
             if (tick % PACKET_INTERVAL == 0) sendRenderPacket();
+        }
+
+        private void updateBlinking(Eye eye) {
+            if (eye.isBlinking) {
+                eye.blinkPhase += eye.blinkSpeed;
+                if (eye.blinkPhase >= 1.0f) {
+                    eye.isBlinking = false;
+                    eye.blinkPhase = 0.0f;
+                    eye.blinkCooldown = 40 + RAND.nextInt(160); // 2-10 seconds until next blink
+                }
+            } else {
+                if (eye.blinkCooldown > 0) {
+                    eye.blinkCooldown--;
+                } else {
+                    // Start a new blink
+                    eye.isBlinking = true;
+                    eye.blinkPhase = 0.0f;
+                    eye.blinkSpeed = 0.12f + RAND.nextFloat() * 0.16f; // 0.12 to 0.28 speed
+                }
+            }
         }
 
         private LivingEntity findNearestTargetWithin(double radius) {
@@ -236,29 +277,31 @@ public class StaffOfEyesItem extends Item {
         private void sendRenderPacket() {
             List<EyeRenderPacket.EyeEntry> entries = new ArrayList<>(eyes.size());
             for (Eye e : eyes) {
-                // Must pass 5 arguments: offset, firing, laserEnd, lookDirection, hitEntityId
-                entries.add(new EyeRenderPacket.EyeEntry(e.offset, e.firing, e.laserEnd, e.look, -1));
+                // Send blinking state and phase for synchronized animation
+                entries.add(new EyeRenderPacket.EyeEntry(e.offset, e.firing, e.laserEnd, e.look, -1, e.isBlinking, e.blinkPhase));
             }
             EyeRenderPacket pkt = new EyeRenderPacket(owner.getId(), entries);
             ModNetworking.CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> owner), pkt);
         }
 
-        private Vec3 pickInitialOffset(int index, int count) {
-            // distribute eyes evenly in a circle around the player, with some height variation
-            double ang = (index / (double) count) * Math.PI * 2.0 + RAND.nextDouble() * 0.3;
-            double radius = 3.5 + RAND.nextDouble() * 2.0; // 3.5 to 5.5 blocks out
-            double y = 1.0 + RAND.nextDouble() * 1.5; // 1.0 to 2.5 blocks up
-            return new Vec3(Math.cos(ang) * radius, y, Math.sin(ang) * radius);
-        }
-
         private static final class Eye {
-            Vec3 offset = Vec3.ZERO;     // fixed offset relative to owner
+            Vec3 offset = Vec3.ZERO;
             Vec3 look = new Vec3(0,0,1);
             boolean firing = false;
             Vec3 laserEnd = null;
             float width = 0.8f, height = 0.4f;
             int fireCooldown = 0;
             int aimTicks = 0;
+
+            // Orbital system
+            int orbitalRing = 0; // 0, 1, or 2
+            double orbitalAngle = 0.0; // current angle on the orbital
+
+            // Enhanced blinking
+            int blinkCooldown = 60;
+            boolean isBlinking = false;
+            float blinkPhase = 0.0f; // 0.0 to 1.0 blink animation
+            float blinkSpeed = 0.15f;
         }
 
         @SubscribeEvent
