@@ -1,5 +1,6 @@
 package net.autismicannoyance.exadditions.client;
 
+import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -208,10 +209,10 @@ public class VectorRenderer {
         if (!translucentCommands.isEmpty()) {
             RenderSystem.enableBlend();
             RenderSystem.blendFuncSeparate(
-                    RenderSystem.SourceFactor.SRC_ALPHA,
-                    RenderSystem.DestFactor.ONE_MINUS_SRC_ALPHA,
-                    RenderSystem.SourceFactor.ONE,
-                    RenderSystem.DestFactor.ONE_MINUS_SRC_ALPHA
+                    GlStateManager.SourceFactor.SRC_ALPHA,
+                    GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
+                    GlStateManager.SourceFactor.ONE,
+                    GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA
             );
             RenderSystem.disableCull();
             RenderSystem.enableDepthTest();
