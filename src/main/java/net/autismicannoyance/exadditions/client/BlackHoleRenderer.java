@@ -12,7 +12,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Enhanced BlackHoleRenderer with proper transparency layering.
+ * Enhanced BlackHoleRenderer with proper transparency layering and dynamic sizing.
  * Uses render priority system to ensure components render in correct order.
  */
 @Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, value = Dist.CLIENT)
@@ -74,6 +74,16 @@ public final class BlackHoleRenderer {
 
     public static void removeEffect(int entityId) {
         EFFECTS.remove(entityId);
+    }
+
+    /**
+     * Updates the size of an existing black hole effect for dynamic scaling
+     */
+    public static void updateEffectSize(int entityId, float newSize) {
+        BlackHoleEffect effect = EFFECTS.get(entityId);
+        if (effect != null) {
+            effect.updateSize(newSize);
+        }
     }
 
     @SubscribeEvent
@@ -436,11 +446,11 @@ public final class BlackHoleRenderer {
     }
 
     /**
-     * BlackHoleEffect management class
+     * BlackHoleEffect management class - Enhanced with dynamic sizing support
      */
     private static final class BlackHoleEffect {
         private final Vec3 position;
-        private final float size;
+        private float size; // Changed from final to mutable for dynamic scaling
         private final float rotationSpeed;
         private final int lifetime;
         private int age = 0;
@@ -452,6 +462,13 @@ public final class BlackHoleRenderer {
             this.size = size;
             this.rotationSpeed = rotationSpeed;
             this.lifetime = lifetime;
+        }
+
+        /**
+         * Updates the size of this black hole effect for dynamic scaling
+         */
+        void updateSize(float newSize) {
+            this.size = Math.max(0.1f, Math.min(20.0f, newSize));
         }
 
         void tick() {

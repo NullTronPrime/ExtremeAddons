@@ -1,5 +1,6 @@
 package net.autismicannoyance.exadditions.item.custom;
 
+import net.autismicannoyance.exadditions.event.BlackHoleEvents;
 import net.autismicannoyance.exadditions.network.BlackHoleEffectPacket;
 import net.autismicannoyance.exadditions.network.ModNetworking;
 import net.minecraft.network.chat.Component;
@@ -18,7 +19,7 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Item for creating black hole visual effects for testing/demonstration
+ * Item for creating functional black holes with physics interactions
  */
 public class BlackHoleGeneratorItem extends Item {
     private static final String SIZE_TAG = "black_hole_size";
@@ -54,6 +55,12 @@ public class BlackHoleGeneratorItem extends Item {
             // Create unique ID for this black hole
             int blackHoleId = RAND.nextInt(Integer.MAX_VALUE);
 
+            // Register with the physics system
+            BlackHoleEvents.addBlackHole(blackHoleId, blackHolePos, size, rotationSpeed, lifetime);
+
+            // Set the level reference for the black hole
+            BlackHoleEvents.setBlackHoleLevel(blackHoleId, serverLevel);
+
             // Create the visual effect packet
             BlackHoleEffectPacket packet = new BlackHoleEffectPacket(
                     blackHoleId,
@@ -72,11 +79,16 @@ public class BlackHoleGeneratorItem extends Item {
             );
 
             player.displayClientMessage(
-                    Component.literal("Created black hole with size " + size +
-                            ", rotation speed " + String.format("%.3f", rotationSpeed) +
-                            ", lifetime " + (lifetime / 20) + "s"),
+                    Component.literal("§8[§5Black Hole Generator§8] §7Created black hole with size §f" + size +
+                            "§7, rotation speed §f" + String.format("%.3f", rotationSpeed) +
+                            "§7, lifetime §f" + (lifetime / 20) + "s"),
                     true
             );
+
+            // Consume item in survival mode
+            if (!player.isCreative()) {
+                stack.shrink(1);
+            }
 
             return InteractionResultHolder.success(stack);
         }
@@ -133,6 +145,13 @@ public class BlackHoleGeneratorItem extends Item {
         tooltip.add(Component.literal("§8Right-click to create black hole"));
         tooltip.add(Component.literal("§8Use /blackhole modify commands"));
         tooltip.add(Component.literal("§8to adjust properties"));
+        tooltip.add(Component.literal(""));
+        tooltip.add(Component.literal("§c⚠ §eDangerous Physics Object"));
+        tooltip.add(Component.literal("§7• Consumes blocks and entities"));
+        tooltip.add(Component.literal("§7• Grows by feeding on matter"));
+        tooltip.add(Component.literal("§7• Shrinks when unfed"));
+        tooltip.add(Component.literal("§7• Polar jets deal massive damage"));
+        tooltip.add(Component.literal("§7• Accretion disk damages by proximity"));
         tooltip.add(Component.literal(""));
         tooltip.add(Component.literal("§6⚠ §eExperimental Technology"));
         tooltip.add(Component.literal("§7May cause spacetime distortions"));
