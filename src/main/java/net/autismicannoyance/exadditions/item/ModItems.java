@@ -34,7 +34,7 @@ public class ModItems {
     public static final RegistryObject<Item> FIRE_RESIST_CHARM = ITEMS.register("fire_resist_charm",
             () -> new FireResistCharmItem(new Item.Properties()
                     .stacksTo(1)       // only one per stack
-                    .fireResistant()   // can’t burn in lava/fire
+                    .fireResistant()   // can't burn in lava/fire
             ));
     public static final RegistryObject<Item> BLAST_RESIST_CHARM = ITEMS.register("blast_resist_charm",
             () -> new FireResistCharmItem(new Item.Properties()
@@ -104,6 +104,14 @@ public class ModItems {
             () -> new StaffOfEyesItem(new Item.Properties().stacksTo(1)));
     public static final RegistryObject<Item> BLACK_HOLE_SUMMONER = ITEMS.register("black_hole_summoner",
             () -> new BlackHoleGeneratorItem(new Item.Properties().stacksTo(1)));
+
+    // New laser rifle item
+    public static final RegistryObject<Item> LASER_RIFLE = ITEMS.register("laser_rifle",
+            () -> new LaserRifleItem(new Item.Properties()
+                    .stacksTo(1)
+                    .durability(200)
+                    .fireResistant()
+            ));
 
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);

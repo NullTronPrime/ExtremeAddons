@@ -36,5 +36,9 @@ public final class ModNetworking {
         // Black hole effect packet - send from server to clients to spawn black hole visuals
         CHANNEL.registerMessage(id(), BlackHoleEffectPacket.class,
                 BlackHoleEffectPacket::encode, BlackHoleEffectPacket::decode, BlackHoleEffectPacket::handle);
+
+        // Laser attack packet - send from server to clients for bouncing laser effects
+        CHANNEL.registerMessage(id(), LaserAttackPacket.class,
+                LaserAttackPacket::encode, LaserAttackPacket::decode, LaserAttackPacket::handle);
     }
 }
