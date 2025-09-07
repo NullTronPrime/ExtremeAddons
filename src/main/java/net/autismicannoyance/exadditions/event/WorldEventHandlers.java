@@ -11,59 +11,61 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 /**
- * Handles world loading/unloading events for black hole persistence
- * FIXED: Delays restoration until world is fully loaded
+ * FIXED: Handles world loading/unloading events for black hole persistence
+ * The issue was trying to restore during world loading events - this causes hanging
+ * because the world isn't fully ready yet. Now we only restore after server is completely started.
  */
 @Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class WorldEventHandlers {
 
-    private static boolean needsRestoration = false;
-    private static ServerLevel pendingLevel = null;
-    private static int restorationDelay = 0;
-    private static final int REQUIRED_DELAY = 100; // 5 seconds at 20 TPS
+    private static boolean restorationCompleted = false;
+    private static int ticksAfterServerStart = 0;
+    private static final int RESTORATION_DELAY = 60; // 3 seconds after server start
 
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
-        System.out.println("[BlackHole Persistence] Server started, scheduling delayed black hole restoration...");
+        System.out.println("[BlackHole Persistence] Server started, will restore black holes after delay...");
 
-        // DON'T restore immediately - schedule for later
-        ServerLevel overworld = event.getServer().getLevel(ServerLevel.OVERWORLD);
-        if (overworld != null) {
-            needsRestoration = true;
-            pendingLevel = overworld;
-            restorationDelay = 0;
-        }
+        // Reset restoration flags
+        restorationCompleted = false;
+        ticksAfterServerStart = 0;
     }
 
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
+        // ONLY handle restoration, nothing else in server tick
         if (event.phase != TickEvent.Phase.END) return;
 
-        // Handle delayed restoration
-        if (needsRestoration && pendingLevel != null) {
-            restorationDelay++;
+        // Only attempt restoration if not already completed
+        if (!restorationCompleted) {
+            ticksAfterServerStart++;
 
-            if (restorationDelay >= REQUIRED_DELAY) {
-                System.out.println("[BlackHole Persistence] World fully loaded, now restoring black holes...");
+            // Wait for the delay, then restore
+            if (ticksAfterServerStart >= RESTORATION_DELAY) {
+                System.out.println("[BlackHole Persistence] Attempting black hole restoration...");
 
                 try {
-                    BlackHoleWorldData worldData = BlackHoleWorldData.get(pendingLevel);
-                    worldData.restoreBlackHoles(pendingLevel);
-
-                    System.out.println("[BlackHole Persistence] Black hole restoration completed successfully!");
+                    ServerLevel overworld = event.getServer().getLevel(ServerLevel.OVERWORLD);
+                    if (overworld != null) {
+                        // This is the critical fix - run restoration asynchronously to avoid blocking
+                        event.getServer().execute(() -> {
+                            try {
+                                BlackHoleWorldData worldData = BlackHoleWorldData.get(overworld);
+                                worldData.restoreBlackHoles(overworld);
+                                System.out.println("[BlackHole Persistence] Black hole restoration completed successfully!");
+                            } catch (Exception e) {
+                                System.err.println("[BlackHole Persistence] Error during restoration: " + e.getMessage());
+                                e.printStackTrace();
+                            }
+                        });
+                    }
                 } catch (Exception e) {
-                    System.err.println("[BlackHole Persistence] Error during restoration: " + e.getMessage());
+                    System.err.println("[BlackHole Persistence] Error scheduling restoration: " + e.getMessage());
                     e.printStackTrace();
                 }
 
-                // Reset flags
-                needsRestoration = false;
-                pendingLevel = null;
-                restorationDelay = 0;
-            } else if (restorationDelay % 20 == 0) {
-                // Progress indicator every second
-                int secondsRemaining = (REQUIRED_DELAY - restorationDelay) / 20;
-                System.out.println("[BlackHole Persistence] Waiting " + secondsRemaining + " more seconds before restoration...");
+                // Mark as completed regardless of success/failure to prevent retry loops
+                restorationCompleted = true;
             }
         }
     }
@@ -73,7 +75,6 @@ public class WorldEventHandlers {
         System.out.println("[BlackHole Persistence] Server stopping, saving black holes...");
 
         try {
-            // Save black holes from the overworld
             ServerLevel overworld = event.getServer().getLevel(ServerLevel.OVERWORLD);
             if (overworld != null) {
                 BlackHoleWorldData worldData = BlackHoleWorldData.get(overworld);
@@ -84,17 +85,20 @@ public class WorldEventHandlers {
             System.err.println("[BlackHole Persistence] Error saving black holes: " + e.getMessage());
             e.printStackTrace();
         }
+
+        // Reset flags for next server start
+        restorationCompleted = false;
+        ticksAfterServerStart = 0;
     }
 
     @SubscribeEvent
     public static void onWorldLoad(LevelEvent.Load event) {
-        if (!(event.getLevel() instanceof ServerLevel serverLevel)) return;
-        if (!serverLevel.dimension().equals(ServerLevel.OVERWORLD)) return;
-
-        System.out.println("[BlackHole Persistence] World load event detected - will restore via server tick delay");
-
-        // DON'T restore here - this causes the hanging issue
-        // The ServerStartedEvent will handle it with proper delay
+        // DO NOT restore here - this is what causes the hanging!
+        // Just log that the world loaded
+        if (event.getLevel() instanceof ServerLevel serverLevel &&
+                serverLevel.dimension().equals(ServerLevel.OVERWORLD)) {
+            System.out.println("[BlackHole Persistence] Overworld loaded - restoration will happen via ServerStartedEvent");
+        }
     }
 
     @SubscribeEvent

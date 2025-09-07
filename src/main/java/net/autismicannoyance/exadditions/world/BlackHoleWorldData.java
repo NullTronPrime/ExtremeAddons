@@ -16,160 +16,237 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Handles persistent storage of black holes across world saves/loads
+ * COMPLETELY REWRITTEN: Safe black hole persistence that won't hang world loading
+ * Uses proper SavedData lifecycle and non-blocking operations
  */
 public class BlackHoleWorldData extends SavedData {
+
     private static final String DATA_NAME = ExAdditions.MOD_ID + "_blackholes";
 
-    private final List<BlackHoleData> blackHoles = new ArrayList<>();
+    // NBT keys
+    private static final String BLACKHOLES_KEY = "BlackHoles";
+    private static final String ID_KEY = "id";
+    private static final String POS_X_KEY = "posX";
+    private static final String POS_Y_KEY = "posY";
+    private static final String POS_Z_KEY = "posZ";
+    private static final String SIZE_KEY = "size";
+    private static final String ROTATION_SPEED_KEY = "rotationSpeed";
+    private static final String AGE_KEY = "age";
+    private static final String CURRENT_ROTATION_KEY = "currentRotation";
+    private static final String TIME_SINCE_FEED_KEY = "timeSinceLastFeed";
+    private static final String PENDING_GROWTH_KEY = "pendingGrowth";
+
+    // Store parsed data in memory
+    private final List<SavedBlackHoleData> savedBlackHoles = new ArrayList<>();
 
     public BlackHoleWorldData() {
         super();
     }
 
-    public BlackHoleWorldData(CompoundTag tag) {
-        this();
-        load(tag);
-    }
-
+    /**
+     * Get or create the world data instance
+     */
     public static BlackHoleWorldData get(ServerLevel level) {
         return level.getDataStorage().computeIfAbsent(
-                BlackHoleWorldData::new,
-                BlackHoleWorldData::new,
+                BlackHoleWorldData::load,
+                BlackHoleWorldData::create,
                 DATA_NAME
         );
     }
 
-    @Override
-    public CompoundTag save(CompoundTag tag) {
-        ListTag blackHoleList = new ListTag();
-
-        for (BlackHoleData bhData : blackHoles) {
-            CompoundTag bhTag = new CompoundTag();
-            bhTag.putInt("id", bhData.id);
-            bhTag.putDouble("x", bhData.position.x);
-            bhTag.putDouble("y", bhData.position.y);
-            bhTag.putDouble("z", bhData.position.z);
-            bhTag.putFloat("size", bhData.size);
-            bhTag.putFloat("rotationSpeed", bhData.rotationSpeed);
-            bhTag.putInt("age", bhData.age);
-            bhTag.putFloat("currentRotation", bhData.currentRotation);
-            bhTag.putInt("timeSinceLastFeed", bhData.timeSinceLastFeed);
-            bhTag.putFloat("pendingGrowth", bhData.pendingGrowth);
-            blackHoleList.add(bhTag);
-        }
-
-        tag.put("blackHoles", blackHoleList);
-        return tag;
+    /**
+     * Create new empty instance
+     */
+    public static BlackHoleWorldData create() {
+        return new BlackHoleWorldData();
     }
 
-    private void load(CompoundTag tag) {
-        blackHoles.clear();
+    /**
+     * Load from NBT - this is called automatically by Minecraft
+     */
+    public static BlackHoleWorldData load(CompoundTag nbt) {
+        BlackHoleWorldData data = new BlackHoleWorldData();
 
-        if (tag.contains("blackHoles", Tag.TAG_LIST)) {
-            ListTag blackHoleList = tag.getList("blackHoles", Tag.TAG_COMPOUND);
+        if (nbt.contains(BLACKHOLES_KEY, Tag.TAG_LIST)) {
+            ListTag blackHoleList = nbt.getList(BLACKHOLES_KEY, Tag.TAG_COMPOUND);
 
-            for (Tag bhTag : blackHoleList) {
-                if (bhTag instanceof CompoundTag compound) {
-                    BlackHoleData bhData = new BlackHoleData();
-                    bhData.id = compound.getInt("id");
+            for (int i = 0; i < blackHoleList.size(); i++) {
+                CompoundTag bhTag = blackHoleList.getCompound(i);
+
+                try {
+                    SavedBlackHoleData bhData = new SavedBlackHoleData();
+                    bhData.id = bhTag.getInt(ID_KEY);
                     bhData.position = new Vec3(
-                            compound.getDouble("x"),
-                            compound.getDouble("y"),
-                            compound.getDouble("z")
+                            bhTag.getDouble(POS_X_KEY),
+                            bhTag.getDouble(POS_Y_KEY),
+                            bhTag.getDouble(POS_Z_KEY)
                     );
-                    bhData.size = compound.getFloat("size");
-                    bhData.rotationSpeed = compound.getFloat("rotationSpeed");
-                    bhData.age = compound.getInt("age");
-                    bhData.currentRotation = compound.getFloat("currentRotation");
-                    bhData.timeSinceLastFeed = compound.getInt("timeSinceLastFeed");
-                    bhData.pendingGrowth = compound.getFloat("pendingGrowth");
+                    bhData.size = bhTag.getFloat(SIZE_KEY);
+                    bhData.rotationSpeed = bhTag.getFloat(ROTATION_SPEED_KEY);
+                    bhData.age = bhTag.getInt(AGE_KEY);
+                    bhData.currentRotation = bhTag.getFloat(CURRENT_ROTATION_KEY);
+                    bhData.timeSinceLastFeed = bhTag.getInt(TIME_SINCE_FEED_KEY);
+                    bhData.pendingGrowth = bhTag.getFloat(PENDING_GROWTH_KEY);
 
-                    blackHoles.add(bhData);
+                    data.savedBlackHoles.add(bhData);
+                } catch (Exception e) {
+                    System.err.println("[BlackHole Persistence] Error loading black hole " + i + ": " + e.getMessage());
                 }
             }
+
+            System.out.println("[BlackHole Persistence] Loaded " + data.savedBlackHoles.size() + " black holes from save data.");
         }
+
+        return data;
     }
 
     /**
-     * Called when the world loads to restore all black holes
+     * Save to NBT - called automatically by Minecraft
+     */
+    @Override
+    public CompoundTag save(CompoundTag nbt) {
+        try {
+            // Get current black hole state from the active system
+            List<BlackHoleEvents.BlackHoleData> activeBlackHoles = BlackHoleEvents.getAllBlackHoleData();
+
+            ListTag blackHoleList = new ListTag();
+
+            for (BlackHoleEvents.BlackHoleData bhData : activeBlackHoles) {
+                try {
+                    CompoundTag bhTag = new CompoundTag();
+                    bhTag.putInt(ID_KEY, bhData.id);
+                    bhTag.putDouble(POS_X_KEY, bhData.position.x);
+                    bhTag.putDouble(POS_Y_KEY, bhData.position.y);
+                    bhTag.putDouble(POS_Z_KEY, bhData.position.z);
+                    bhTag.putFloat(SIZE_KEY, bhData.size);
+                    bhTag.putFloat(ROTATION_SPEED_KEY, bhData.rotationSpeed);
+                    bhTag.putInt(AGE_KEY, bhData.age);
+                    bhTag.putFloat(CURRENT_ROTATION_KEY, bhData.currentRotation);
+                    bhTag.putInt(TIME_SINCE_FEED_KEY, bhData.timeSinceLastFeed);
+                    bhTag.putFloat(PENDING_GROWTH_KEY, bhData.pendingGrowth);
+
+                    blackHoleList.add(bhTag);
+                } catch (Exception e) {
+                    System.err.println("[BlackHole Persistence] Error saving black hole " + bhData.id + ": " + e.getMessage());
+                }
+            }
+
+            nbt.put(BLACKHOLES_KEY, blackHoleList);
+
+            System.out.println("[BlackHole Persistence] Saved " + blackHoleList.size() + " black holes to NBT.");
+
+        } catch (Exception e) {
+            System.err.println("[BlackHole Persistence] Error during save: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        return nbt;
+    }
+
+    /**
+     * SAFE restoration method - called after server is fully started
      */
     public void restoreBlackHoles(ServerLevel level) {
-        for (BlackHoleData bhData : blackHoles) {
-            // Restore the black hole to the active system
-            BlackHoleEvents.restoreBlackHole(
-                    bhData.id,
-                    bhData.position,
-                    bhData.size,
-                    bhData.rotationSpeed,
-                    bhData.age,
-                    bhData.currentRotation,
-                    bhData.timeSinceLastFeed,
-                    bhData.pendingGrowth,
-                    level
-            );
-
-            // Send visual effect to clients
-            BlackHoleEffectPacket packet = new BlackHoleEffectPacket(
-                    bhData.id,
-                    bhData.position,
-                    bhData.size,
-                    bhData.rotationSpeed,
-                    999999 // Long lifetime for restored black holes
-            );
-
-            ModNetworking.CHANNEL.send(
-                    PacketDistributor.NEAR.with(() -> new PacketDistributor.TargetPoint(
-                            bhData.position.x, bhData.position.y, bhData.position.z,
-                            200.0, level.dimension()
-                    )),
-                    packet
-            );
+        if (savedBlackHoles.isEmpty()) {
+            System.out.println("[BlackHole Persistence] No black holes to restore.");
+            return;
         }
 
-        // Clear the temporary storage since they're now in the active system
-        blackHoles.clear();
-        setDirty();
+        System.out.println("[BlackHole Persistence] Starting restoration of " + savedBlackHoles.size() + " black holes...");
+
+        int restored = 0;
+
+        for (SavedBlackHoleData bhData : savedBlackHoles) {
+            try {
+                // Restore the black hole to the active system
+                BlackHoleEvents.restoreBlackHole(
+                        bhData.id,
+                        bhData.position,
+                        bhData.size,
+                        bhData.rotationSpeed,
+                        bhData.age,
+                        bhData.currentRotation,
+                        bhData.timeSinceLastFeed,
+                        bhData.pendingGrowth,
+                        level
+                );
+
+                // Schedule visual effect creation (delayed to ensure clients are ready)
+                final SavedBlackHoleData finalBhData = bhData;
+                level.getServer().execute(() -> {
+                    try {
+                        BlackHoleEffectPacket packet = new BlackHoleEffectPacket(
+                                finalBhData.id,
+                                finalBhData.position,
+                                finalBhData.size,
+                                finalBhData.rotationSpeed,
+                                999999 // Long lifetime
+                        );
+
+                        ModNetworking.CHANNEL.send(
+                                PacketDistributor.NEAR.with(() -> new PacketDistributor.TargetPoint(
+                                        finalBhData.position.x,
+                                        finalBhData.position.y,
+                                        finalBhData.position.z,
+                                        200.0,
+                                        level.dimension()
+                                )),
+                                packet
+                        );
+                    } catch (Exception e) {
+                        System.err.println("[BlackHole Persistence] Error sending visual packet for black hole " +
+                                finalBhData.id + ": " + e.getMessage());
+                    }
+                });
+
+                restored++;
+
+            } catch (Exception e) {
+                System.err.println("[BlackHole Persistence] Error restoring black hole " + bhData.id + ": " + e.getMessage());
+            }
+        }
+
+        System.out.println("[BlackHole Persistence] Successfully restored " + restored + "/" + savedBlackHoles.size() + " black holes!");
+
+        // Clear the saved data since it's now active
+        savedBlackHoles.clear();
     }
 
     /**
-     * Save current black hole state before world unload
+     * Force save the world data
      */
     public void saveBlackHoles(ServerLevel level) {
-        blackHoles.clear();
+        this.setDirty(); // Mark for saving
 
-        // Get all active black holes and their data
-        List<BlackHoleEvents.BlackHoleData> activeBlackHoles = BlackHoleEvents.getAllBlackHoleData();
-
-        for (BlackHoleEvents.BlackHoleData bhData : activeBlackHoles) {
-            BlackHoleData saveData = new BlackHoleData();
-            saveData.id = bhData.id;
-            saveData.position = bhData.position;
-            saveData.size = bhData.size;
-            saveData.rotationSpeed = bhData.rotationSpeed;
-            saveData.age = bhData.age;
-            saveData.currentRotation = bhData.currentRotation;
-            saveData.timeSinceLastFeed = bhData.timeSinceLastFeed;
-            saveData.pendingGrowth = bhData.pendingGrowth;
-
-            blackHoles.add(saveData);
+        // Force immediate save
+        try {
+            level.getDataStorage().save();
+            System.out.println("[BlackHole Persistence] Forced save completed.");
+        } catch (Exception e) {
+            System.err.println("[BlackHole Persistence] Error during forced save: " + e.getMessage());
         }
-
-        setDirty();
     }
 
     /**
-     * Clear all saved black holes from persistent storage
+     * Clear all saved black hole data (used by commands)
      */
     public void clearAllSavedBlackHoles() {
-        blackHoles.clear();
-        setDirty();
+        savedBlackHoles.clear();
+        this.setDirty(); // Mark for saving to persist the cleared state
+        System.out.println("[BlackHole Persistence] Cleared all saved black hole data.");
     }
 
     /**
-     * Data structure for saving/loading black hole information
+     * Get the number of saved black holes
      */
-    private static class BlackHoleData {
+    public int getSavedBlackHoleCount() {
+        return savedBlackHoles.size();
+    }
+
+    /**
+     * Data structure for holding saved black hole information
+     */
+    private static class SavedBlackHoleData {
         int id;
         Vec3 position;
         float size;
