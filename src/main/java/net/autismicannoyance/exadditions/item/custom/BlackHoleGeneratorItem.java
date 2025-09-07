@@ -28,7 +28,7 @@ public class BlackHoleGeneratorItem extends Item {
 
     private static final float DEFAULT_SIZE = 2.0f;
     private static final float DEFAULT_ROTATION_SPEED = 0.02f;
-    private static final int DEFAULT_LIFETIME = 1200; // 60 seconds at 20 TPS
+    private static final int DEFAULT_LIFETIME = 2400; // 2 minutes for visual effect only
 
     private static final Random RAND = new Random();
 
@@ -44,7 +44,7 @@ public class BlackHoleGeneratorItem extends Item {
             // Get parameters from item NBT or use defaults
             float size = getSize(stack);
             float rotationSpeed = getRotationSpeed(stack);
-            int lifetime = getLifetime(stack);
+            int visualLifetime = getLifetime(stack); // This is ONLY for the visual effect
 
             // Create black hole at player's position with slight offset
             Vec3 playerPos = player.position();
@@ -55,19 +55,19 @@ public class BlackHoleGeneratorItem extends Item {
             // Create unique ID for this black hole
             int blackHoleId = RAND.nextInt(Integer.MAX_VALUE);
 
-            // Register with the physics system
-            BlackHoleEvents.addBlackHole(blackHoleId, blackHolePos, size, rotationSpeed, lifetime);
+            // Register with the physics system - SERVER HAS INFINITE LIFETIME
+            BlackHoleEvents.addBlackHole(blackHoleId, blackHolePos, size, rotationSpeed, -1); // -1 = infinite
 
             // Set the level reference for the black hole
             BlackHoleEvents.setBlackHoleLevel(blackHoleId, serverLevel);
 
-            // Create the visual effect packet
+            // Create the visual effect packet - CLIENT HAS LIMITED INITIAL LIFETIME
             BlackHoleEffectPacket packet = new BlackHoleEffectPacket(
                     blackHoleId,
                     blackHolePos,
                     size,
                     rotationSpeed,
-                    lifetime
+                    999999 // Very long lifetime - server will control when it disappears
             );
 
             // Send to all players in the area
@@ -81,7 +81,7 @@ public class BlackHoleGeneratorItem extends Item {
             player.displayClientMessage(
                     Component.literal("§8[§5Black Hole Generator§8] §7Created black hole with size §f" + size +
                             "§7, rotation speed §f" + String.format("%.3f", rotationSpeed) +
-                            "§7, lifetime §f" + (lifetime / 20) + "s"),
+                            "§7. §aServer controls lifetime - visual stays until black hole dies!"),
                     true
             );
 
@@ -140,11 +140,16 @@ public class BlackHoleGeneratorItem extends Item {
 
         tooltip.add(Component.literal("§7Size: §f" + String.format("%.1f", size)));
         tooltip.add(Component.literal("§7Rotation Speed: §f" + String.format("%.3f", rotationSpeed)));
-        tooltip.add(Component.literal("§7Lifetime: §f" + (lifetime / 20) + "s"));
+        tooltip.add(Component.literal("§7Visual Lifetime: §f" + (lifetime / 20) + "s §8(initial)"));
         tooltip.add(Component.literal(""));
         tooltip.add(Component.literal("§8Right-click to create black hole"));
         tooltip.add(Component.literal("§8Use /blackhole modify commands"));
         tooltip.add(Component.literal("§8to adjust properties"));
+        tooltip.add(Component.literal(""));
+        tooltip.add(Component.literal("§a✓ §2Server-Controlled Lifetime"));
+        tooltip.add(Component.literal("§7• Black hole exists until it starves"));
+        tooltip.add(Component.literal("§7• Visual effect synced with physics"));
+        tooltip.add(Component.literal("§7• No phantom damage after disappearance"));
         tooltip.add(Component.literal(""));
         tooltip.add(Component.literal("§c⚠ §eDangerous Physics Object"));
         tooltip.add(Component.literal("§7• Consumes blocks and entities"));
