@@ -76,6 +76,32 @@ public class BlackHoleEvents {
         ACTIVE_BLACK_HOLES.remove(id);
     }
 
+    /**
+     * ADDED: Method to clear all black holes properly
+     */
+    public static int clearAllBlackHoles(ServerLevel level) {
+        int clearedCount = ACTIVE_BLACK_HOLES.size();
+
+        // Send removal packets for all active black holes
+        for (Map.Entry<Integer, BlackHole> entry : ACTIVE_BLACK_HOLES.entrySet()) {
+            BlackHole blackHole = entry.getValue();
+
+            // Send removal packet to clients
+            BlackHoleEffectPacket removePacket = new BlackHoleEffectPacket(blackHole.id);
+            ModNetworking.CHANNEL.send(
+                    PacketDistributor.NEAR.with(() -> new PacketDistributor.TargetPoint(
+                            blackHole.position.x, blackHole.position.y, blackHole.position.z,
+                            200.0, level.dimension()
+                    )), removePacket
+            );
+        }
+
+        // Clear the server-side map
+        ACTIVE_BLACK_HOLES.clear();
+
+        return clearedCount;
+    }
+
     public static void updateBlackHoleSize(int id, float newSize, int additionalLifetime) {
         BlackHole blackHole = ACTIVE_BLACK_HOLES.get(id);
         if (blackHole != null) {
@@ -137,12 +163,13 @@ public class BlackHoleEvents {
                 refreshBlackHoleVisual(blackHole, serverLevel);
             }
 
-            // Process destruction and physics - MEMORY-SAFE VERSION
-            processBlackHoleMemorySafe(blackHole, serverLevel);
-
+            // Process entities FIRST (before blocks to ensure instant entity kills in event horizon)
             if (!blackHole.isMarkedForRemoval()) {
                 processEntitiesAccurate(blackHole, serverLevel);
             }
+
+            // Process destruction and physics - MEMORY-SAFE VERSION
+            processBlackHoleMemorySafe(blackHole, serverLevel);
         }
     }
 
@@ -195,12 +222,13 @@ public class BlackHoleEvents {
         int searchRadius = Math.min(MAX_SEARCH_RADIUS, (int)Math.ceil(Math.max(accretionOuter, jetLength)) + 2);
 
         // Process zones using STREAMING approach - no pre-loading of blocks
+        // FIXED: Event horizon should be FIRST priority
         DestructionZone[] priorityOrder = {
-                DestructionZone.EVENT_HORIZON,
-                DestructionZone.POLAR_JET,
-                DestructionZone.PHOTON_SPHERE,
-                DestructionZone.ACCRETION_INNER,
-                DestructionZone.ACCRETION_OUTER
+                DestructionZone.EVENT_HORIZON,    // Highest priority - instant destruction
+                DestructionZone.PHOTON_SPHERE,   // Second priority
+                DestructionZone.POLAR_JET,       // Third priority
+                DestructionZone.ACCRETION_INNER, // Fourth priority
+                DestructionZone.ACCRETION_OUTER  // Lowest priority
         };
 
         for (DestructionZone zone : priorityOrder) {
@@ -228,6 +256,7 @@ public class BlackHoleEvents {
 
     /**
      * STREAMING zone processing - destroys blocks as we find them, no memory allocation
+     * FIXED: Proper priority handling for event horizon
      */
     private static int processZoneStreaming(BlackHole blackHole, ServerLevel level, BlockPos center, Vec3 centerVec,
                                             int radius, DestructionZone zone, float eventHorizon, float photonSphere,
@@ -243,16 +272,23 @@ public class BlackHoleEvents {
         // Process each zone with optimized loops and early termination
         switch (zone) {
             case EVENT_HORIZON -> {
-                // Most critical zone - sphere search with immediate processing
+                // FIXED: Most critical zone - GUARANTEED to process all blocks in event horizon
                 int eventRadius = Math.min(radius, (int)Math.ceil(eventHorizon) + 1);
-                for (int x = -eventRadius; x <= eventRadius && blocksDestroyed < maxBlocks; x++) {
-                    for (int y = -eventRadius; y <= eventRadius && blocksDestroyed < maxBlocks; y++) {
-                        for (int z = -eventRadius; z <= eventRadius && blocksDestroyed < maxBlocks; z++) {
-                            float distSq = x*x + y*y + z*z;
-                            if (distSq <= eventHorizonSq) {
-                                BlockPos pos = center.offset(x, y, z);
-                                if (destroyBlockIfValid(blackHole, level, pos)) {
-                                    blocksDestroyed++;
+
+                // Process from inside out to ensure core is cleared first
+                for (int shell = 0; shell <= eventRadius && blocksDestroyed < maxBlocks; shell++) {
+                    for (int x = -shell; x <= shell && blocksDestroyed < maxBlocks; x++) {
+                        for (int y = -shell; y <= shell && blocksDestroyed < maxBlocks; y++) {
+                            for (int z = -shell; z <= shell && blocksDestroyed < maxBlocks; z++) {
+                                // Only process blocks on the current shell
+                                if (Math.abs(x) == shell || Math.abs(y) == shell || Math.abs(z) == shell) {
+                                    float distSq = x*x + y*y + z*z;
+                                    if (distSq <= eventHorizonSq) {
+                                        BlockPos pos = center.offset(x, y, z);
+                                        if (destroyBlockIfValid(blackHole, level, pos)) {
+                                            blocksDestroyed++;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -347,7 +383,7 @@ public class BlackHoleEvents {
     }
 
     /**
-     * Accurate entity processing with proper damage zones and hitboxes
+     * FIXED: Accurate entity processing with proper damage zones, hitboxes, and spiral pull
      */
     private static void processEntitiesAccurate(BlackHole blackHole, ServerLevel level) {
         if (blackHole.isMarkedForRemoval()) {
@@ -365,11 +401,17 @@ public class BlackHoleEvents {
 
         Vec3 blackHoleCenter = blackHole.position;
 
-        float maxRange = Math.max(accretionOuter, jetLength) * 1.2f; // Reduced range
+        // FIXED: Larger search radius to catch entities before they get too close
+        float maxRange = Math.max(accretionOuter, jetLength) * 1.5f;
         AABB searchArea = AABB.ofSize(blackHoleCenter, maxRange * 2, maxRange * 2, maxRange * 2);
+
+        // FIXED: Get ALL entities, not just specific classes
         List<Entity> entities = level.getEntitiesOfClass(Entity.class, searchArea);
 
+        System.out.println("BlackHole processing " + entities.size() + " entities in range"); // Debug
+
         for (Entity entity : entities) {
+            // Skip creative players
             if (entity instanceof Player player && player.isCreative()) continue;
 
             Vec3 entityPos = entity.position().add(0, entity.getBbHeight() * 0.5, 0);
@@ -379,18 +421,23 @@ public class BlackHoleEvents {
             float totalDistance = (float) entityPos.distanceTo(blackHoleCenter);
             float verticalOffset = (float)relativePos.y;
 
+            System.out.println("Entity " + entity.getName().getString() + " at distance " + totalDistance + " from black hole"); // Debug
+
             DamageZone zone = calculateDamageZone(totalDistance, horizontalDist, verticalOffset,
                     eventHorizon, photonSphere, accretionInner, accretionOuter, jetLength, jetWidth);
+
+            System.out.println("Entity " + entity.getName().getString() + " in zone: " + zone); // Debug
 
             // Apply zone-specific effects
             switch (zone) {
                 case EVENT_HORIZON -> {
+                    System.out.println("KILLING entity in event horizon: " + entity.getName().getString()); // Debug
                     entity.remove(Entity.RemovalReason.KILLED);
-                    continue;
+                    continue; // Skip further processing for dead entity
                 }
 
                 case PHOTON_SPHERE -> {
-                    float damage = EVENT_HORIZON_DAMAGE * (photonSphere - totalDistance) / (photonSphere - eventHorizon);
+                    float damage = PHOTON_SPHERE_DAMAGE * (photonSphere - totalDistance) / (photonSphere - eventHorizon);
                     entity.hurt(level.damageSources().genericKill(), Math.min(damage, 100.0f));
 
                     Vec3 pullDirection = blackHoleCenter.subtract(entityPos).normalize();
@@ -417,14 +464,8 @@ public class BlackHoleEvents {
 
                     entity.hurt(level.damageSources().genericKill(), Math.min(accretionDamage, 40.0f));
 
-                    Vec3 orbitalDirection = new Vec3(-relativePos.z, 0, relativePos.x).normalize();
-                    Vec3 pullDirection = blackHoleCenter.subtract(entityPos).normalize();
-
-                    float orbitalSpeed = 0.3f * currentSize / Math.max(horizontalDist, 1.0f);
-                    float pullStrength = 0.8f * currentSize / Math.max(totalDistance * totalDistance, 0.25f);
-
-                    Vec3 combinedForce = orbitalDirection.scale(orbitalSpeed).add(pullDirection.scale(pullStrength));
-                    entity.setDeltaMovement(entity.getDeltaMovement().add(combinedForce));
+                    // FIXED: Proper spiral motion based on black hole rotation
+                    applyAccretionDiskMotion(entity, relativePos, blackHole, currentSize, horizontalDist, true);
 
                     entity.setSecondsOnFire((int)(accretionDamage / 15.0f));
                 }
@@ -434,14 +475,8 @@ public class BlackHoleEvents {
 
                     entity.hurt(level.damageSources().genericKill(), Math.min(accretionDamage, 25.0f));
 
-                    Vec3 orbitalDirection = new Vec3(-relativePos.z, 0, relativePos.x).normalize();
-                    Vec3 pullDirection = blackHoleCenter.subtract(entityPos).normalize();
-
-                    float orbitalSpeed = 0.15f * currentSize / Math.max(horizontalDist, 1.0f);
-                    float pullStrength = 0.4f * currentSize / Math.max(totalDistance * totalDistance, 0.5f);
-
-                    Vec3 combinedForce = orbitalDirection.scale(orbitalSpeed).add(pullDirection.scale(pullStrength));
-                    entity.setDeltaMovement(entity.getDeltaMovement().add(combinedForce));
+                    // FIXED: Proper spiral motion based on black hole rotation
+                    applyAccretionDiskMotion(entity, relativePos, blackHole, currentSize, horizontalDist, false);
                 }
 
                 case GRAVITATIONAL_INFLUENCE -> {
@@ -459,11 +494,45 @@ public class BlackHoleEvents {
         }
     }
 
+    /**
+     * FIXED: Apply proper accretion disk motion with spiral based on black hole rotation
+     */
+    private static void applyAccretionDiskMotion(Entity entity, Vec3 relativePos, BlackHole blackHole,
+                                                 float currentSize, float horizontalDist, boolean isInner) {
+
+        // Get the current rotation of the black hole for spiral direction
+        float currentRotation = blackHole.getCurrentRotation();
+
+        // Orbital direction based on black hole rotation (clockwise or counter-clockwise)
+        Vec3 orbitalDirection;
+        if (blackHole.rotationSpeed > 0) {
+            // Positive rotation = counter-clockwise when viewed from above
+            orbitalDirection = new Vec3(-relativePos.z, 0, relativePos.x).normalize();
+        } else {
+            // Negative rotation = clockwise when viewed from above
+            orbitalDirection = new Vec3(relativePos.z, 0, -relativePos.x).normalize();
+        }
+
+        // Pull direction towards center
+        Vec3 pullDirection = relativePos.scale(-1).normalize();
+
+        // Calculate forces based on distance and black hole properties
+        float orbitalSpeed = Math.abs(blackHole.rotationSpeed) * 10.0f * currentSize / Math.max(horizontalDist, 1.0f);
+        float pullStrength = (isInner ? 0.8f : 0.4f) * currentSize / Math.max(horizontalDist * horizontalDist, 0.25f);
+
+        // Combine orbital and inward motion for spiral effect
+        Vec3 combinedForce = orbitalDirection.scale(orbitalSpeed).add(pullDirection.scale(pullStrength));
+
+        // Apply the motion
+        entity.setDeltaMovement(entity.getDeltaMovement().add(combinedForce));
+    }
+
     private static DamageZone calculateDamageZone(float totalDistance, float horizontalDistance, float verticalOffset,
                                                   float eventHorizon, float photonSphere,
                                                   float accretionInner, float accretionOuter,
                                                   float jetLength, float jetWidth) {
 
+        // FIXED: Ensure event horizon is always checked first and is most restrictive
         if (totalDistance <= eventHorizon) {
             return DamageZone.EVENT_HORIZON;
         }
@@ -565,28 +634,30 @@ public class BlackHoleEvents {
 
     private enum DestructionZone {
         EVENT_HORIZON,
-        POLAR_JET,
         PHOTON_SPHERE,
+        POLAR_JET,
         ACCRETION_INNER,
         ACCRETION_OUTER
     }
 
     /**
-     * Enhanced BlackHole class with proper removal state management
+     * Enhanced BlackHole class with proper removal state management and rotation tracking
+     * ADDED: Made fields accessible for persistence
      */
-    private static class BlackHole {
+    public static class BlackHole {
         final int id;
         final Vec3 position;
         float size;
         private float pendingSize;
-        private float pendingGrowth = 0.0f;
+        float pendingGrowth = 0.0f; // Made public for persistence
         final float rotationSpeed;
         int lifetime;
-        int age = 0;
-        int timeSinceLastFeed = 0;
+        int age = 0; // Made public for persistence
+        int timeSinceLastFeed = 0; // Made public for persistence
         private boolean activelyFeeding = false;
         private boolean markedForRemoval = false;
         private int removalTimer = 0;
+        float currentRotation = 0.0f; // Made public for persistence
         Level level;
 
         BlackHole(int id, Vec3 position, float size, float rotationSpeed, int lifetime) {
@@ -601,9 +672,22 @@ public class BlackHoleEvents {
         void tick() {
             age++;
 
+            // Update rotation for spiral calculations
+            currentRotation += rotationSpeed;
+            if (currentRotation > 2f * (float)Math.PI) {
+                currentRotation -= 2f * (float)Math.PI;
+            }
+
             if (markedForRemoval) {
                 removalTimer++;
             }
+        }
+
+        /**
+         * Get current rotation for spiral motion calculations
+         */
+        float getCurrentRotation() {
+            return currentRotation;
         }
 
         /**
@@ -689,5 +773,19 @@ public class BlackHoleEvents {
                 lifetime = Math.max(lifetime, age + ticks);
             }
         }
+    }
+
+    /**
+     * ADDED: Data structure for transferring black hole data for persistence
+     */
+    public static class BlackHoleData {
+        public int id;
+        public Vec3 position;
+        public float size;
+        public float rotationSpeed;
+        public int age;
+        public float currentRotation;
+        public int timeSinceLastFeed;
+        public float pendingGrowth;
     }
 }

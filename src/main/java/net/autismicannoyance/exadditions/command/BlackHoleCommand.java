@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import net.autismicannoyance.exadditions.event.BlackHoleEvents;
 import net.autismicannoyance.exadditions.item.custom.BlackHoleGeneratorItem;
 import net.autismicannoyance.exadditions.network.BlackHoleEffectPacket;
 import net.autismicannoyance.exadditions.network.ModNetworking;
@@ -78,8 +79,12 @@ public class BlackHoleCommand {
         // Use a unique ID for the black hole
         int blackHoleId = (int) (System.currentTimeMillis() % Integer.MAX_VALUE);
 
+        // Register with the physics system - SERVER HAS INFINITE LIFETIME
+        BlackHoleEvents.addBlackHole(blackHoleId, position, size, rotationSpeed, -1); // -1 = infinite
+        BlackHoleEvents.setBlackHoleLevel(blackHoleId, level);
+
         BlackHoleEffectPacket packet = new BlackHoleEffectPacket(
-                blackHoleId, position, size, rotationSpeed, lifetime
+                blackHoleId, position, size, rotationSpeed, 999999
         );
 
         // Send to all players in the area
@@ -130,21 +135,27 @@ public class BlackHoleCommand {
         return 1;
     }
 
+    /**
+     * FIXED: Properly clear all black holes using the BlackHoleEvents system and persistent storage
+     */
     private static int clearAllBlackHoles(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         CommandSourceStack source = context.getSource();
         ServerLevel level = source.getLevel();
 
-        // Send removal packets for all possible black hole IDs
-        // This is a simple approach - in a real implementation you'd track active black holes
-        for (int i = 0; i < 100; i++) {
-            BlackHoleEffectPacket removePacket = new BlackHoleEffectPacket(i);
-            ModNetworking.CHANNEL.send(
-                    PacketDistributor.DIMENSION.with(() -> level.dimension()),
-                    removePacket
-            );
+        // Clear from the active system
+        int clearedCount = BlackHoleEvents.clearAllBlackHoles(level);
+
+        // Also clear from persistent storage to prevent restoration on next load
+        net.autismicannoyance.exadditions.world.BlackHoleWorldData worldData =
+                net.autismicannoyance.exadditions.world.BlackHoleWorldData.get(level);
+        worldData.clearAllSavedBlackHoles(); // We'll add this method
+
+        if (clearedCount > 0) {
+            source.sendSuccess(() -> Component.literal("Cleared " + clearedCount + " black hole effect(s) and removed from world save data"), true);
+        } else {
+            source.sendSuccess(() -> Component.literal("No active black holes found"), false);
         }
 
-        source.sendSuccess(() -> Component.literal("Cleared all black hole effects"), true);
-        return 1;
+        return clearedCount;
     }
 }

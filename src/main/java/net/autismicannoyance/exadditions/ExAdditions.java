@@ -1,5 +1,6 @@
 package net.autismicannoyance.exadditions;
 
+import net.autismicannoyance.exadditions.command.BlackHoleCommand;
 import net.autismicannoyance.exadditions.command.TestRenderCommand;
 import net.autismicannoyance.exadditions.effect.ModEffects;
 import net.autismicannoyance.exadditions.enchantment.ModEnchantments;
@@ -75,11 +76,12 @@ public class ExAdditions {
     public void onServerStarting(ServerStartingEvent event) {
     }
 
-//    // Add command registration event handler
-//    @SubscribeEvent
-//    public void onRegisterCommands(RegisterCommandsEvent event) {
-//        TestRenderCommand.register(event.getDispatcher());
-//    }
+    // FIXED: Enable command registration event handler
+    @SubscribeEvent
+    public void onRegisterCommands(RegisterCommandsEvent event) {
+        BlackHoleCommand.register(event.getDispatcher());
+        //TestRenderCommand.register(event.getDispatcher()); // Uncomment if needed
+    }
 
     @Mod.EventBusSubscriber(modid = MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
     public static class ClientModEvents {
