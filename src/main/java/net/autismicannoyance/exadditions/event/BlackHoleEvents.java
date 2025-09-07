@@ -20,16 +20,17 @@ import net.minecraftforge.network.PacketDistributor;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * Black hole physics with gradual block destruction to prevent lag
+ * Aggressive black hole physics that destroys everything within visual boundaries
  */
 @Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class BlackHoleEvents {
 
     private static final Map<Integer, BlackHole> ACTIVE_BLACK_HOLES = new ConcurrentHashMap<>();
 
-    // Exact renderer constants
+    // Visual zone multipliers - EXACTLY matching renderer
     private static final float EVENT_HORIZON_MULTIPLIER = 1.0f;
     private static final float PHOTON_SPHERE_MULTIPLIER = 1.5f;
     private static final float ACCRETION_INNER_MULTIPLIER = 2.5f;
@@ -37,16 +38,18 @@ public class BlackHoleEvents {
     private static final float JET_LENGTH_MULTIPLIER = 20.0f;
     private static final float JET_WIDTH_MULTIPLIER = 0.8f;
 
-    // Performance limits to prevent lag
-    private static final int MAX_BLOCKS_PER_TICK = 25; // Reduced for smooth performance
-    private static final int BLOCK_PROCESS_INTERVAL = 1; // Process every tick
-    private static final int ENTITY_PROCESS_INTERVAL = 1; // Process every tick
+    // Aggressive block destruction limits
+    private static final int MAX_BLOCKS_PER_TICK_PER_HOLE = 15;  // More aggressive
+    private static final int MAX_BLOCKS_QUEUED_PER_HOLE = 200;   // Larger queue
+    private static final int BLOCK_SCAN_INTERVAL = 3;            // Scan more frequently
+    private static final int ENTITY_PROCESS_INTERVAL = 1;        // Process every tick
 
-    // Growth constants
-    private static final float BASE_GROWTH = 0.08f;
-    private static final int BASE_LIFETIME = 100;
-    private static final int DECAY_TIMER = 60;
-    private static final float DECAY_RATE = 0.02f;
+    // Moderate growth rates
+    private static final float BASE_GROWTH_RATE = 0.02f;         // Moderate growth
+    private static final float GROWTH_SCALING = 0.8f;            // Scales with size
+    private static final int BASE_LIFETIME_BONUS = 40;           // Good lifetime bonus
+    private static final int DECAY_TIMER = 80;                   // Moderate decay delay
+    private static final float DECAY_RATE = 0.01f;               // Moderate decay
 
     public static void addBlackHole(int id, Vec3 position, float size, float rotationSpeed, int lifetime) {
         ACTIVE_BLACK_HOLES.put(id, new BlackHole(id, position, size, rotationSpeed, lifetime));
@@ -85,6 +88,7 @@ public class BlackHoleEvents {
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+        if (ACTIVE_BLACK_HOLES.isEmpty()) return;
 
         Iterator<Map.Entry<Integer, BlackHole>> iterator = ACTIVE_BLACK_HOLES.entrySet().iterator();
         while (iterator.hasNext()) {
@@ -103,7 +107,6 @@ public class BlackHoleEvents {
             blackHole.tick();
 
             if (blackHole.isExpired()) {
-                // Send removal packet immediately when black hole expires
                 BlackHoleEffectPacket removePacket = new BlackHoleEffectPacket(blackHole.id);
                 ModNetworking.CHANNEL.send(
                         PacketDistributor.NEAR.with(() -> new PacketDistributor.TargetPoint(
@@ -115,13 +118,12 @@ public class BlackHoleEvents {
                 continue;
             }
 
-            // Process black hole physics while it's active
-            processBlackHole(blackHole, serverLevel);
+            processBlackHoleAggressive(blackHole, serverLevel);
         }
     }
 
-    private static void processBlackHole(BlackHole blackHole, ServerLevel level) {
-        // Calculate visual zones
+    private static void processBlackHoleAggressive(BlackHole blackHole, ServerLevel level) {
+        // Calculate exact visual zones
         float eventHorizon = blackHole.size * EVENT_HORIZON_MULTIPLIER;
         float photonSphere = blackHole.size * PHOTON_SPHERE_MULTIPLIER;
         float accretionInner = blackHole.size * ACCRETION_INNER_MULTIPLIER;
@@ -131,29 +133,34 @@ public class BlackHoleEvents {
 
         boolean fedThisTick = false;
 
-        // Process entities every tick for smooth damage
+        // Process entities every tick
         if (blackHole.age % ENTITY_PROCESS_INTERVAL == 0) {
             fedThisTick |= processEntities(blackHole, level, eventHorizon, photonSphere,
                     accretionInner, accretionOuter, jetLength, jetWidth);
         }
 
-        // Process blocks gradually to prevent lag
-        if (blackHole.age % BLOCK_PROCESS_INTERVAL == 0) {
-            fedThisTick |= processBlocksGradually(blackHole, level, eventHorizon, photonSphere,
-                    accretionInner, accretionOuter);
+        // Aggressive block scanning
+        if (blackHole.age % BLOCK_SCAN_INTERVAL == 0) {
+            scanForBlocksAggressive(blackHole, level, eventHorizon, photonSphere, accretionInner, accretionOuter, jetLength, jetWidth);
         }
 
-        // Handle growth/decay
+        // Process more blocks per tick
+        fedThisTick |= processQueuedBlocksAggressive(blackHole, level);
+
+        // Growth/decay handling
         handleGrowthDecay(blackHole, fedThisTick);
     }
 
-    private static boolean processEntities(BlackHole blackHole, ServerLevel level, float eventHorizon,
-                                           float photonSphere, float accretionInner, float accretionOuter,
+    private static boolean processEntities(BlackHole blackHole, ServerLevel level,
+                                           float eventHorizon, float photonSphere,
+                                           float accretionInner, float accretionOuter,
                                            float jetLength, float jetWidth) {
         boolean fed = false;
 
+        // Search the full visual area
+        float searchRadius = Math.max(accretionOuter, jetLength);
         AABB searchArea = AABB.ofSize(blackHole.position,
-                accretionOuter * 2.2, Math.max(jetLength * 2.2, accretionOuter * 2.2), accretionOuter * 2.2);
+                searchRadius * 2.2, jetLength * 2.2, searchRadius * 2.2);
 
         List<Entity> entities = level.getEntitiesOfClass(Entity.class, searchArea);
 
@@ -164,12 +171,12 @@ public class BlackHoleEvents {
             Vec3 delta = entityCenter.subtract(blackHole.position);
             float distance = (float) delta.length();
 
-            // Check jets - vertical cylinders
+            // Polar jets - vertical cylinders extending up and down
             boolean inJet = Math.abs(delta.y) > eventHorizon && Math.abs(delta.y) <= jetLength &&
                     Math.sqrt(delta.x * delta.x + delta.z * delta.z) <= jetWidth;
 
             if (inJet) {
-                float jetDamage = 60.0f * blackHole.size;
+                float jetDamage = 50.0f * blackHole.size;
                 entity.hurt(level.damageSources().genericKill(), jetDamage);
                 continue;
             }
@@ -183,7 +190,7 @@ public class BlackHoleEvents {
 
             // Photon sphere - extreme damage
             if (distance <= photonSphere) {
-                float photonDamage = 30.0f * blackHole.size;
+                float photonDamage = 25.0f * blackHole.size;
                 entity.hurt(level.damageSources().genericKill(), photonDamage);
                 applySpiral(entity, blackHole, distance, 2.0f);
                 continue;
@@ -191,7 +198,7 @@ public class BlackHoleEvents {
 
             // Inner accretion disk
             if (distance <= accretionInner) {
-                float innerDamage = 15.0f * blackHole.size;
+                float innerDamage = 12.0f * blackHole.size;
                 entity.hurt(level.damageSources().genericKill(), innerDamage);
                 applySpiral(entity, blackHole, distance, 1.5f);
                 continue;
@@ -205,7 +212,7 @@ public class BlackHoleEvents {
                 continue;
             }
 
-            // Gravitational influence
+            // Gravitational influence beyond visual boundary
             if (distance <= accretionOuter * 1.3f) {
                 Vec3 pull = blackHole.position.subtract(entityCenter).normalize();
                 float pullStrength = (0.08f * blackHole.size) / Math.max(distance * distance, 1.0f);
@@ -217,109 +224,156 @@ public class BlackHoleEvents {
         return fed;
     }
 
-    private static boolean processBlocksGradually(BlackHole blackHole, ServerLevel level, float eventHorizon,
-                                                  float photonSphere, float accretionInner, float accretionOuter) {
-        boolean fed = false;
-        BlockPos center = BlockPos.containing(blackHole.position);
+    /**
+     * Aggressively scan for blocks matching ALL visual zones
+     */
+    private static void scanForBlocksAggressive(BlackHole blackHole, ServerLevel level,
+                                                float eventHorizon, float photonSphere,
+                                                float accretionInner, float accretionOuter,
+                                                float jetLength, float jetWidth) {
 
-        // Create a list of blocks to process, sorted by priority
-        List<BlockCandidate> candidates = new ArrayList<>();
-        int searchRadius = (int) Math.ceil(accretionOuter) + 1;
-
-        // Collect blocks in spiral pattern starting from center
-        for (int r = 0; r <= searchRadius; r++) {
-            for (int x = -r; x <= r; x++) {
-                for (int y = -r; y <= r; y++) {
-                    for (int z = -r; z <= r; z++) {
-                        // Skip blocks not on the edge of current radius
-                        if (r > 0 && Math.abs(x) < r && Math.abs(y) < r && Math.abs(z) < r) continue;
-
-                        BlockPos pos = center.offset(x, y, z);
-                        Vec3 blockCenter = Vec3.atCenterOf(pos);
-                        float distance = (float) blackHole.position.distanceTo(blockCenter);
-
-                        if (distance <= accretionOuter) {
-                            BlockState state = level.getBlockState(pos);
-                            if (!state.isAir() && !state.is(Blocks.BEDROCK) && !state.is(Blocks.BARRIER)) {
-                                candidates.add(new BlockCandidate(pos, state, distance));
-                            }
-                        }
-                    }
-                }
-            }
+        // Don't overfill the queue
+        if (blackHole.blockQueue.size() >= MAX_BLOCKS_QUEUED_PER_HOLE) {
+            return;
         }
 
-        // Sort by distance (closest first) for more realistic consumption
-        candidates.sort((a, b) -> Float.compare(a.distance, b.distance));
+        BlockPos center = BlockPos.containing(blackHole.position);
 
-        // Process limited number of blocks per tick to prevent lag
+        // Scan the full visual area - include jets
+        int horizontalRadius = (int) Math.ceil(accretionOuter) + 2;
+        int verticalRadius = (int) Math.ceil(jetLength) + 2;
+
+        // More aggressive scanning
+        int blocksScanned = 0;
+        final int MAX_BLOCKS_TO_SCAN = 150; // Increased scan limit
+
+        // Start from where we left off for distributed scanning
+        for (int y = blackHole.lastScanY; y <= verticalRadius && blocksScanned < MAX_BLOCKS_TO_SCAN; y++) {
+            for (int x = -horizontalRadius; x <= horizontalRadius && blocksScanned < MAX_BLOCKS_TO_SCAN; x++) {
+                for (int z = -horizontalRadius; z <= horizontalRadius && blocksScanned < MAX_BLOCKS_TO_SCAN; z++) {
+
+                    // Check both positive and negative Y
+                    for (int ySign : new int[]{1, -1}) {
+                        int actualY = y * ySign;
+                        BlockPos pos = center.offset(x, actualY, z);
+                        Vec3 blockCenter = Vec3.atCenterOf(pos);
+                        Vec3 delta = blockCenter.subtract(blackHole.position);
+                        float distance = (float) delta.length();
+
+                        BlockState state = level.getBlockState(pos);
+                        if (state.isAir() || state.is(Blocks.BEDROCK) || state.is(Blocks.BARRIER)) {
+                            continue;
+                        }
+
+                        boolean shouldDestroy = false;
+
+                        // Check if in polar jet first
+                        boolean inJet = Math.abs(delta.y) > eventHorizon && Math.abs(delta.y) <= jetLength &&
+                                Math.sqrt(delta.x * delta.x + delta.z * delta.z) <= jetWidth;
+
+                        if (inJet) {
+                            shouldDestroy = true; // Jets destroy everything they touch
+                        }
+                        // Event horizon - always destroy
+                        else if (distance <= eventHorizon) {
+                            shouldDestroy = true;
+                        }
+                        // Photon sphere - very high chance
+                        else if (distance <= photonSphere) {
+                            shouldDestroy = level.random.nextFloat() < 0.95f;
+                        }
+                        // Inner accretion - high chance
+                        else if (distance <= accretionInner) {
+                            shouldDestroy = level.random.nextFloat() < 0.85f;
+                        }
+                        // Outer accretion - moderate to high chance with distance falloff
+                        else if (distance <= accretionOuter) {
+                            float ratio = (accretionOuter - distance) / (accretionOuter - accretionInner);
+                            float chance = 0.4f + (0.4f * ratio); // 40-80% chance based on distance
+                            shouldDestroy = level.random.nextFloat() < chance;
+                        }
+
+                        if (shouldDestroy) {
+                            blackHole.blockQueue.offer(new QueuedBlock(pos, state, distance));
+                        }
+
+                        blocksScanned++;
+                        if (blocksScanned >= MAX_BLOCKS_TO_SCAN) break;
+                    }
+                    if (blocksScanned >= MAX_BLOCKS_TO_SCAN) break;
+                }
+                if (blocksScanned >= MAX_BLOCKS_TO_SCAN) break;
+            }
+            blackHole.lastScanY = y + 1;
+            if (blocksScanned >= MAX_BLOCKS_TO_SCAN) break;
+        }
+
+        // Reset scan when complete
+        if (blackHole.lastScanY > verticalRadius) {
+            blackHole.lastScanY = -verticalRadius;
+        }
+    }
+
+    /**
+     * Process more queued blocks per tick for aggressive destruction
+     */
+    private static boolean processQueuedBlocksAggressive(BlackHole blackHole, ServerLevel level) {
+        boolean fed = false;
         int processed = 0;
-        for (BlockCandidate candidate : candidates) {
-            if (processed >= MAX_BLOCKS_PER_TICK) break;
 
-            float distance = candidate.distance;
-            boolean shouldDestroy = false;
+        while (!blackHole.blockQueue.isEmpty() && processed < MAX_BLOCKS_PER_TICK_PER_HOLE) {
+            QueuedBlock queuedBlock = blackHole.blockQueue.poll();
+            if (queuedBlock == null) break;
 
-            // Event horizon - always destroy
-            if (distance <= eventHorizon) {
-                shouldDestroy = true;
-            }
-            // Photon sphere - high chance
-            else if (distance <= photonSphere) {
-                shouldDestroy = level.random.nextFloat() < 0.9f;
-            }
-            // Inner accretion - medium-high chance
-            else if (distance <= accretionInner) {
-                shouldDestroy = level.random.nextFloat() < 0.7f;
-            }
-            // Outer accretion - distance-based chance
-            else if (distance <= accretionOuter) {
-                float ratio = (accretionOuter - distance) / (accretionOuter - accretionInner);
-                float chance = 0.5f * ratio * ratio; // Quadratic falloff
-                shouldDestroy = level.random.nextFloat() < chance;
-            }
-
-            if (shouldDestroy) {
-                level.setBlock(candidate.pos, Blocks.AIR.defaultBlockState(), 3);
-                consumeBlock(blackHole, candidate.state);
+            // Verify block is still there
+            BlockState currentState = level.getBlockState(queuedBlock.pos);
+            if (!currentState.isAir() && !currentState.is(Blocks.BEDROCK) && !currentState.is(Blocks.BARRIER)) {
+                level.setBlock(queuedBlock.pos, Blocks.AIR.defaultBlockState(), 3);
+                consumeBlock(blackHole, queuedBlock.originalState);
                 fed = true;
-                processed++;
-            } else {
-                processed++; // Count checked blocks to maintain performance limit
             }
+            processed++;
         }
 
         return fed;
     }
 
     private static void consumeBlock(BlackHole blackHole, BlockState state) {
-        float growth = BASE_GROWTH * blackHole.size; // Scale with current size
+        float baseGrowth = BASE_GROWTH_RATE * (1.0f + blackHole.size * GROWTH_SCALING);
 
-        // Different blocks provide different growth
+        // Material-based growth multipliers
+        float materialMultiplier = 1.0f;
         if (state.is(Blocks.OBSIDIAN) || state.is(Blocks.IRON_BLOCK)) {
-            growth *= 1.5f;
+            materialMultiplier = 1.4f;
         } else if (state.is(Blocks.DIAMOND_BLOCK) || state.is(Blocks.NETHERITE_BLOCK)) {
-            growth *= 3.0f;
+            materialMultiplier = 2.5f;
         } else if (state.is(Blocks.DIRT) || state.is(Blocks.SAND)) {
-            growth *= 0.8f; // Less growth from soft materials
+            materialMultiplier = 0.9f;
         }
 
+        float growth = baseGrowth * materialMultiplier;
         blackHole.size += growth;
-        blackHole.lifetime += (int)(BASE_LIFETIME * blackHole.size * 0.1f);
+        blackHole.lifetime += (int)(BASE_LIFETIME_BONUS * materialMultiplier);
         blackHole.timeSinceLastFeed = 0;
         blackHole.size = Math.min(blackHole.size, 20.0f);
     }
 
     private static void handleGrowthDecay(BlackHole blackHole, boolean fedThisTick) {
         if (fedThisTick) {
-            updateBlackHoleSize(blackHole.id, blackHole.size, 0);
+            // Send size updates every 15 ticks for better responsiveness
+            if (blackHole.age % 15 == 0) {
+                updateBlackHoleSize(blackHole.id, blackHole.size, 0);
+            }
         } else {
             blackHole.timeSinceLastFeed++;
             if (blackHole.timeSinceLastFeed > DECAY_TIMER) {
-                float decay = DECAY_RATE * blackHole.size; // Proportional decay
+                float decay = DECAY_RATE * Math.max(0.5f, blackHole.size);
                 blackHole.size = Math.max(0.1f, blackHole.size - decay);
-                blackHole.lifetime = Math.max(0, blackHole.lifetime - 20);
-                updateBlackHoleSize(blackHole.id, blackHole.size, 0);
+                blackHole.lifetime = Math.max(0, blackHole.lifetime - 10);
+
+                if (blackHole.age % 30 == 0) {
+                    updateBlackHoleSize(blackHole.id, blackHole.size, 0);
+                }
             }
         }
     }
@@ -328,19 +382,19 @@ public class BlackHoleEvents {
         Vec3 toCenter = blackHole.position.subtract(entity.position());
         Vec3 tangent = new Vec3(-toCenter.z, 0, toCenter.x).normalize();
 
-        // Size-scaled orbital velocity
-        float orbitalSpeed = (0.12f * blackHole.size * intensity) / Math.max(distance, 0.1f);
+        // Scaled orbital motion
+        float orbitalSpeed = (0.08f * blackHole.size * intensity) / Math.max(distance, 0.1f);
         Vec3 orbital = tangent.scale(orbitalSpeed);
 
-        // Size-scaled inward pull
-        float inwardPull = 0.06f * blackHole.size * intensity;
+        // Scaled inward pull
+        float inwardPull = 0.04f * blackHole.size * intensity / Math.max(distance, 0.1f);
         Vec3 inward = toCenter.normalize().scale(inwardPull);
 
         Vec3 totalForce = orbital.add(inward);
-        Vec3 newVel = entity.getDeltaMovement().add(totalForce.scale(0.15f));
+        Vec3 newVel = entity.getDeltaMovement().add(totalForce.scale(0.12f));
 
-        // Size-scaled speed limit
-        double maxSpeed = 1.8 + (blackHole.size * 0.15);
+        // Reasonable speed limits
+        double maxSpeed = 1.2 + (blackHole.size * 0.08);
         if (newVel.length() > maxSpeed) {
             newVel = newVel.normalize().scale(maxSpeed);
         }
@@ -348,14 +402,14 @@ public class BlackHoleEvents {
         entity.setDeltaMovement(newVel);
     }
 
-    private static class BlockCandidate {
+    private static class QueuedBlock {
         final BlockPos pos;
-        final BlockState state;
+        final BlockState originalState;
         final float distance;
 
-        BlockCandidate(BlockPos pos, BlockState state, float distance) {
+        QueuedBlock(BlockPos pos, BlockState originalState, float distance) {
             this.pos = pos;
-            this.state = state;
+            this.originalState = originalState;
             this.distance = distance;
         }
     }
@@ -368,7 +422,10 @@ public class BlackHoleEvents {
         int lifetime;
         int age = 0;
         int timeSinceLastFeed = 0;
+        int lastScanY = Integer.MIN_VALUE; // Track Y-level scanning progress
         Level level;
+
+        final Queue<QueuedBlock> blockQueue = new ConcurrentLinkedQueue<>();
 
         BlackHole(int id, Vec3 position, float size, float rotationSpeed, int lifetime) {
             this.id = id;
@@ -376,6 +433,7 @@ public class BlackHoleEvents {
             this.size = size;
             this.rotationSpeed = rotationSpeed;
             this.lifetime = lifetime;
+            this.lastScanY = -(int)Math.ceil(size * JET_LENGTH_MULTIPLIER) - 2; // Start from bottom
         }
 
         void tick() {
