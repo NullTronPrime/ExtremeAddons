@@ -21,9 +21,6 @@ import net.minecraftforge.network.PacketDistributor;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Ultra-fast black hole with perfect visual sync - stays alive during destruction
- */
 @Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class BlackHoleEvents {
 
