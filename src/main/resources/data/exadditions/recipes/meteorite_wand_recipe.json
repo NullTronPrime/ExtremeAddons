@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "  C",
+    " S ",
+    "S  "
+  ],
+  "key": {
+    "C": {
+      "item": "exadditions:chaos_crystal"
+    },
+    "S": {
+      "item": "exadditions:sapphire"
+    }
+  },
+  "result": {
+    "item": "exadditions:meteorite_wand"
+  }
+}

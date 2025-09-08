@@ -128,6 +128,13 @@ public class ModItems {
                     .rarity(Rarity.RARE)
             ));
 
+    public static final RegistryObject<Item> METEORITE_WAND = ITEMS.register("meteorite_wand",
+            () -> new MeteoriteWandItem(new Item.Properties()
+                    .stacksTo(1)
+                    .durability(10) // Limited uses
+                    .rarity(Rarity.EPIC)
+            ));
+
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);
     }

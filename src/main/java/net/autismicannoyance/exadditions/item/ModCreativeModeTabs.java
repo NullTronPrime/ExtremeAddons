@@ -53,6 +53,7 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModItems.ECHO_RIFLE.get());
                         pOutput.accept(ModItems.PULSAR_CANNON.get());
                         pOutput.accept(ModItems.AI_HIJACKER.get());
+                        pOutput.accept(ModItems.METEORITE_WAND.get());
 
                     })
                     .build());
