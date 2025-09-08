@@ -10,120 +10,160 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Dedicated renderer for Echo Rifle beams inspired by Warden sonic boom attacks.
- * Creates circular beam patterns with particle rings using VectorRenderer.
+ * Enhanced Echo Rifle beam renderer inspired by Warden sonic booms and Deep Dark aesthetics.
+ * Creates layered sculk-themed beams with pulsing energy, distortion effects, and menacing visuals.
  */
 @Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, value = Dist.CLIENT)
 public class EchoBeamRenderer {
 
-    // Deep Dark color palette
-    private static final int BEAM_CORE_COLOR = 0xFF00D4FF;      // Bright cyan core
-    private static final int BEAM_INNER_COLOR = 0xDD1B5E5E;     // Medium dark teal
-    private static final int BEAM_OUTER_COLOR = 0xBB0F2A2A;     // Dark teal
-    private static final int PARTICLE_BRIGHT = 0xFF4DFFFF;      // Bright cyan particles
-    private static final int PARTICLE_MEDIUM = 0xCC00AAD4;      // Medium cyan particles
-    private static final int PARTICLE_DIM = 0x88003D4D;         // Dim teal particles
-    private static final int ENERGY_RING_COLOR = 0xEE00FFD4;    // Energy ring color
+    // Deep Dark / Sculk color palette - more menacing and atmospheric
+    private static final int BEAM_CORE_COLOR = 0xFF00E6FF;        // Bright cyan-blue core (soul fire blue)
+    private static final int BEAM_INNER_COLOR = 0xDD1A4D4D;       // Dark teal with transparency
+    private static final int BEAM_OUTER_COLOR = 0xBB0A2A2A;       // Very dark teal/black
+    private static final int SOUL_GLOW_COLOR = 0xEE4DAAFF;        // Soul fire glow
+    private static final int DARKNESS_COLOR = 0x99000816;         // Almost black with slight blue tint
+    private static final int ENERGY_CRACKLE_COLOR = 0xFF66DDFF;   // Electric blue crackles
+    private static final int VOID_COLOR = 0x77000000;             // Pure darkness
+    private static final int SCULK_PULSE_COLOR = 0xCC003366;      // Deep purple-blue pulse
 
-    // Beam properties
-    private static final int BEAM_SEGMENTS = 16;                // Circular segments
-    private static final int PARTICLE_RINGS = 8;               // Number of particle rings
-    private static final double PARTICLE_RING_SPACING = 2.0;   // Distance between rings
+    // Enhanced beam properties
+    private static final int BEAM_SEGMENTS = 20;                  // More detailed circular cross-section
+    private static final int DISTORTION_RINGS = 12;              // Distortion rings along beam
+    private static final int CRACKLE_BOLTS = 8;                  // Electric-style energy bolts
+    private static final double RING_SPACING = 1.5;              // Closer ring spacing for density
+    private static final double PULSE_FREQUENCY = 0.3;           // Pulsing animation speed
 
     /**
-     * Renders an impressive echo beam effect with circular cross-section and particle rings
+     * Renders an impressive sculk-themed echo beam with multiple visual layers and effects
      */
     public static void renderEchoBeam(Vec3 start, Vec3 end, double beamWidth, int hitCount) {
         Vec3 direction = end.subtract(start);
         double beamLength = direction.length();
         Vec3 normalizedDir = direction.normalize();
 
-        // Calculate beam duration based on power and hits
-        int baseDuration = 15; // 0.75 seconds
-        int bonusDuration = Math.min(hitCount * 3, 20); // +0.15s per hit, max +1s
-        int beamDuration = baseDuration + bonusDuration;
+        // Enhanced duration based on power and hits - longer for more impact
+        int baseDuration = 25; // 1.25 seconds base
+        int bonusDuration = Math.min(hitCount * 4, 30); // +0.2s per hit, max +1.5s
+        int totalDuration = baseDuration + bonusDuration;
 
-        // 1. Main circular beam core
-        renderCircularBeamCore(start, end, beamWidth, beamDuration);
+        // 1. Darkness void beam - creates menacing hollow center
+        renderVoidCore(start, end, beamWidth, totalDuration);
 
-        // 2. Particle rings along the beam (like sonic boom)
-        renderParticleRings(start, normalizedDir, beamLength, beamWidth, beamDuration);
+        // 2. Layered sculk beam cores with pulsing animation
+        renderSculkBeamLayers(start, end, beamWidth, totalDuration);
 
-        // 3. Energy spiral around the beam
-        renderEnergySpiral(start, end, beamWidth, beamDuration);
+        // 3. Distortion rings with sculk-like pulsing
+        renderSculkDistortionRings(start, normalizedDir, beamLength, beamWidth, totalDuration);
 
-        // 4. Impact effects at the end
+        // 4. Energy crackles - chaotic electric arcs around the beam
+        renderEnergyCrackles(start, end, beamWidth, totalDuration);
+
+        // 5. Soul fire spiral - mystical energy wrapping the beam
+        renderSoulFireSpiral(start, end, beamWidth, totalDuration);
+
+        // 6. Void tendrils - dark tentacle-like extensions
+        renderVoidTendrils(start, end, beamWidth, totalDuration);
+
+        // 7. Enhanced impact effects with sculk explosion
         if (hitCount > 0) {
-            renderImpactEffect(end, beamWidth, hitCount, beamDuration);
+            renderSculkImpactExplosion(end, beamWidth, hitCount, totalDuration);
         }
 
-        // 5. Ambient floating particles
-        renderAmbientParticles(start, end, beamWidth, beamDuration);
+        // 8. Atmospheric darkness particles
+        renderDarknessAtmosphere(start, end, beamWidth, totalDuration);
     }
 
     /**
-     * Creates the main circular beam using multiple concentric cylinders
+     * Creates a menacing dark void core that makes the beam look like it tears reality
      */
-    private static void renderCircularBeamCore(Vec3 start, Vec3 end, double width, int duration) {
+    private static void renderVoidCore(Vec3 start, Vec3 end, double width, int duration) {
         Vec3 direction = end.subtract(start).normalize();
         float distance = (float) start.distanceTo(end);
 
-        // Create concentric circular beam layers
-        float coreRadius = (float)(width * 0.15);     // Bright core
-        float innerRadius = (float)(width * 0.3);     // Medium layer
-        float outerRadius = (float)(width * 0.45);    // Outer layer
+        // Create a dark void cylinder in the center
+        float voidRadius = (float)(width * 0.1);
 
-        // Core beam - brightest
         VectorRenderer.drawCylinderWorld(
-                start, direction, coreRadius, distance,
-                BEAM_SEGMENTS, 2, BEAM_CORE_COLOR, false, duration, null
-        );
-
-        // Inner layer - medium brightness
-        VectorRenderer.drawCylinderWorld(
-                start, direction, innerRadius, distance,
-                BEAM_SEGMENTS, 2, BEAM_INNER_COLOR, false, duration + 2, null
-        );
-
-        // Outer layer - dimmer
-        VectorRenderer.drawCylinderWorld(
-                start, direction, outerRadius, distance,
-                BEAM_SEGMENTS, 2, BEAM_OUTER_COLOR, false, duration + 4, null
+                start, direction, voidRadius, distance,
+                16, 3, VOID_COLOR, false, duration, null
         );
     }
 
     /**
-     * Creates particle rings along the beam path similar to Warden sonic boom
+     * Creates layered sculk beam cores with pulsing animation
      */
-    private static void renderParticleRings(Vec3 start, Vec3 direction, double length, double width, int duration) {
-        int numRings = (int) Math.ceil(length / PARTICLE_RING_SPACING);
+    private static void renderSculkBeamLayers(Vec3 start, Vec3 end, double width, int duration) {
+        Vec3 direction = end.subtract(start).normalize();
+        float distance = (float) start.distanceTo(end);
+
+        // Start the beam layers slightly forward from the firing position
+        Vec3 adjustedStart = start.add(direction.scale(0.5)); // Start 0.5 blocks forward
+        float adjustedDistance = distance - 0.5f;
+
+        if (adjustedDistance <= 0) return; // Don't render if too short
+
+        // Multiple pulsing layers for depth and menace
+        float[] layerRadii = {
+                (float)(width * 0.15),  // Inner core
+                (float)(width * 0.25),  // Mid layer
+                (float)(width * 0.35),  // Outer layer
+                (float)(width * 0.45)   // Outermost layer
+        };
+
+        int[] layerColors = {
+                BEAM_CORE_COLOR,
+                SOUL_GLOW_COLOR,
+                BEAM_INNER_COLOR,
+                DARKNESS_COLOR
+        };
+
+        for (int i = 0; i < layerRadii.length; i++) {
+            // Stagger the start times for a wave effect
+            int layerDelay = i * 2;
+
+            VectorRenderer.drawCylinderWorld(
+                    adjustedStart, direction, layerRadii[i], adjustedDistance,
+                    BEAM_SEGMENTS, 4, layerColors[i], false,
+                    duration + layerDelay, null
+            );
+        }
+    }
+
+    /**
+     * Creates sculk-style distortion rings with pulsing effects
+     */
+    private static void renderSculkDistortionRings(Vec3 start, Vec3 direction, double length, double width, int duration) {
+        int numRings = (int) Math.ceil(length / RING_SPACING);
 
         for (int ring = 0; ring < numRings; ring++) {
-            double ringDistance = ring * PARTICLE_RING_SPACING;
+            double ringDistance = ring * RING_SPACING;
             if (ringDistance > length) break;
 
             Vec3 ringCenter = start.add(direction.scale(ringDistance));
-            double ringRadius = width * 0.6; // Base ring radius
 
-            // Create expanding ring effect
-            for (int expansion = 0; expansion < 3; expansion++) {
-                double expandedRadius = ringRadius + (expansion * width * 0.2);
-                int ringColor = expansion == 0 ? PARTICLE_BRIGHT :
-                        expansion == 1 ? PARTICLE_MEDIUM : PARTICLE_DIM;
+            // Create multiple expanding rings with sculk theming
+            for (int expansion = 0; expansion < 4; expansion++) {
+                double baseRadius = width * 0.4;
+                double expandedRadius = baseRadius + (expansion * width * 0.15);
 
-                renderParticleRing(ringCenter, direction, expandedRadius, ringColor,
-                        duration + expansion * 2 + ring);
+                // Alternate between sculk colors for layered effect
+                int ringColor = (expansion % 2 == 0) ? SCULK_PULSE_COLOR : DARKNESS_COLOR;
+
+                // Make rings pulse by varying their timing
+                int pulseDelay = (ring * 3) + (expansion * 2);
+
+                renderPulsingRing(ringCenter, direction, expandedRadius, ringColor,
+                        duration + pulseDelay);
             }
         }
     }
 
     /**
-     * Renders a single particle ring perpendicular to the beam direction
+     * Renders a single pulsing sculk ring
      */
-    private static void renderParticleRing(Vec3 center, Vec3 beamDirection, double radius, int color, int duration) {
-        int particlesPerRing = 12;
+    private static void renderPulsingRing(Vec3 center, Vec3 beamDirection, double radius, int color, int duration) {
+        int particlesPerRing = 16; // More particles for smoother rings
 
-        // Find two perpendicular vectors to the beam direction
         Vec3 perpendicular1 = beamDirection.cross(new Vec3(0, 1, 0));
         if (perpendicular1.length() < 0.1) {
             perpendicular1 = beamDirection.cross(new Vec3(1, 0, 0));
@@ -131,148 +171,263 @@ public class EchoBeamRenderer {
         perpendicular1 = perpendicular1.normalize();
         Vec3 perpendicular2 = beamDirection.cross(perpendicular1).normalize();
 
-        // Create ring of particles
         for (int i = 0; i < particlesPerRing; i++) {
             double angle = (2 * Math.PI * i) / particlesPerRing;
             Vec3 offset = perpendicular1.scale(Math.cos(angle) * radius)
                     .add(perpendicular2.scale(Math.sin(angle) * radius));
             Vec3 particlePos = center.add(offset);
 
-            // Individual particle
-            float particleSize = 0.15f + (float)(Math.random() * 0.1f);
+            // Vary particle size for organic feel
+            float particleSize = 0.2f + (float)(Math.random() * 0.15f);
+
             VectorRenderer.drawSphereWorld(
                     particlePos, particleSize, color,
-                    6, 6, false, duration, null
+                    8, 8, false, duration, null
             );
         }
     }
 
     /**
-     * Creates a spiraling energy effect around the main beam
+     * Creates chaotic energy crackles around the beam like lightning
      */
-    private static void renderEnergySpiral(Vec3 start, Vec3 end, double width, int duration) {
+    private static void renderEnergyCrackles(Vec3 start, Vec3 end, double width, int duration) {
         Vec3 direction = end.subtract(start);
         double length = direction.length();
         Vec3 normalizedDir = direction.normalize();
 
-        // Create spiral parameters
-        int spiralSegments = (int)(length * 2); // 2 segments per block
-        double spiralRadius = width * 0.7;
-        double spiralTurns = 3.0; // Number of complete turns
+        // Create jagged energy bolts around the beam
+        for (int bolt = 0; bolt < CRACKLE_BOLTS; bolt++) {
+            List<Vec3> boltPoints = new ArrayList<>();
 
-        // Find perpendicular vectors
-        Vec3 perpendicular1 = normalizedDir.cross(new Vec3(0, 1, 0));
-        if (perpendicular1.length() < 0.1) {
-            perpendicular1 = normalizedDir.cross(new Vec3(1, 0, 0));
-        }
-        perpendicular1 = perpendicular1.normalize();
-        Vec3 perpendicular2 = normalizedDir.cross(perpendicular1).normalize();
+            // Generate a chaotic path around the beam
+            int segments = 8 + (int)(Math.random() * 6);
+            double boltRadius = width * (0.6 + Math.random() * 0.3);
 
-        List<Vec3> spiralPoints = new ArrayList<>();
+            for (int i = 0; i < segments; i++) {
+                double t = (double) i / (segments - 1);
 
-        for (int i = 0; i < spiralSegments; i++) {
-            double t = (double) i / (spiralSegments - 1);
-            double angle = spiralTurns * 2 * Math.PI * t;
-            double currentRadius = spiralRadius * (1.0 - t * 0.3); // Taper towards end
+                // Base position along beam
+                Vec3 basePos = start.add(normalizedDir.scale(length * t));
 
-            Vec3 basePoint = start.add(normalizedDir.scale(length * t));
-            Vec3 spiralOffset = perpendicular1.scale(Math.cos(angle) * currentRadius)
-                    .add(perpendicular2.scale(Math.sin(angle) * currentRadius));
+                // Add random offset for chaotic movement
+                double angle = Math.random() * 2 * Math.PI;
+                double distance = boltRadius * (0.5 + Math.random() * 0.5);
+                double heightOffset = (Math.random() - 0.5) * width * 0.4;
 
-            spiralPoints.add(basePoint.add(spiralOffset));
-        }
+                Vec3 cracklePos = basePos.add(
+                        Math.cos(angle) * distance,
+                        heightOffset,
+                        Math.sin(angle) * distance
+                );
 
-        // Render spiral as connected line segments
-        for (int i = 0; i < spiralPoints.size() - 1; i++) {
-            VectorRenderer.drawLineWorld(
-                    spiralPoints.get(i),
-                    spiralPoints.get(i + 1),
-                    ENERGY_RING_COLOR,
-                    (float)(width * 0.08), // Thin spiral line
-                    false,
-                    duration + i / 2, // Slight stagger
-                    null
+                boltPoints.add(cracklePos);
+            }
+
+            // Render the bolt as a polyline
+            VectorRenderer.drawPolylineWorld(
+                    boltPoints, ENERGY_CRACKLE_COLOR,
+                    0.12f, false, duration + bolt, null
             );
         }
     }
 
     /**
-     * Creates impact effects where the beam ends
+     * Creates a mystical soul fire spiral around the beam
      */
-    private static void renderImpactEffect(Vec3 impact, double width, int hitCount, int duration) {
-        // Main impact blast
-        VectorRenderer.drawSphereWorld(
-                impact, (float)(width * 1.2), BEAM_CORE_COLOR,
-                12, 8, false, duration / 2, null
-        );
-
-        // Expanding shockwave rings
-        for (int ring = 0; ring < 4; ring++) {
-            float delay = ring * 2f;
-            float ringSize = (float)(width * (1.5 + ring * 0.8));
-            int ringAlpha = Math.max(0x33, 0xFF - ring * 0x33);
-            int ringColor = (ringAlpha << 24) | (ENERGY_RING_COLOR & 0xFFFFFF);
-
-            VectorRenderer.drawSphereWorld(
-                    impact, ringSize, ringColor,
-                    16, 12, false, (duration / 3) + (int)delay, null
-            );
-        }
-
-        // Energy burst particles based on hit count
-        int burstParticles = Math.min(hitCount * 3, 15);
-        for (int i = 0; i < burstParticles; i++) {
-            // Random direction for particle
-            double theta = Math.random() * 2 * Math.PI;
-            double phi = Math.random() * Math.PI;
-            double distance = width * (0.8 + Math.random() * 1.2);
-
-            Vec3 particleOffset = new Vec3(
-                    Math.sin(phi) * Math.cos(theta) * distance,
-                    Math.cos(phi) * distance,
-                    Math.sin(phi) * Math.sin(theta) * distance
-            );
-
-            Vec3 particlePos = impact.add(particleOffset);
-            float particleSize = 0.2f + (float)(Math.random() * 0.3f);
-            int particleColor = i % 2 == 0 ? PARTICLE_BRIGHT : PARTICLE_MEDIUM;
-
-            VectorRenderer.drawSphereWorld(
-                    particlePos, particleSize, particleColor,
-                    6, 6, false, duration + (int)(Math.random() * 10), null
-            );
-        }
-    }
-
-    /**
-     * Creates ambient floating particles around the beam
-     */
-    private static void renderAmbientParticles(Vec3 start, Vec3 end, double width, int duration) {
+    private static void renderSoulFireSpiral(Vec3 start, Vec3 end, double width, int duration) {
         Vec3 direction = end.subtract(start);
         double length = direction.length();
-        int numParticles = (int)(length / 1.5); // One particle every 1.5 blocks
+        Vec3 normalizedDir = direction.normalize();
+
+        // Create dual counter-rotating spirals for more mystical effect
+        for (int spiral = 0; spiral < 2; spiral++) {
+            int spiralSegments = (int)(length * 3);
+            double spiralRadius = width * 0.8;
+            double spiralTurns = 4.0;
+            boolean clockwise = spiral == 0;
+
+            Vec3 perpendicular1 = normalizedDir.cross(new Vec3(0, 1, 0));
+            if (perpendicular1.length() < 0.1) {
+                perpendicular1 = normalizedDir.cross(new Vec3(1, 0, 0));
+            }
+            perpendicular1 = perpendicular1.normalize();
+            Vec3 perpendicular2 = normalizedDir.cross(perpendicular1).normalize();
+
+            List<Vec3> spiralPoints = new ArrayList<>();
+
+            for (int i = 0; i < spiralSegments; i++) {
+                double t = (double) i / (spiralSegments - 1);
+                double angle = spiralTurns * 2 * Math.PI * t;
+                if (!clockwise) angle = -angle; // Counter-rotate second spiral
+
+                // Vary radius along the spiral for organic feel
+                double currentRadius = spiralRadius * (0.7 + 0.3 * Math.sin(t * Math.PI * 3));
+
+                Vec3 basePoint = start.add(normalizedDir.scale(length * t));
+                Vec3 spiralOffset = perpendicular1.scale(Math.cos(angle) * currentRadius)
+                        .add(perpendicular2.scale(Math.sin(angle) * currentRadius));
+
+                spiralPoints.add(basePoint.add(spiralOffset));
+            }
+
+            // Use different colors for each spiral
+            int spiralColor = spiral == 0 ? SOUL_GLOW_COLOR : SCULK_PULSE_COLOR;
+
+            VectorRenderer.drawPolylineWorld(
+                    spiralPoints, spiralColor,
+                    0.15f, false, duration + spiral * 3, null
+            );
+        }
+    }
+
+    /**
+     * Creates dark void tendrils extending from the beam
+     */
+    private static void renderVoidTendrils(Vec3 start, Vec3 end, double width, int duration) {
+        Vec3 direction = end.subtract(start);
+        double length = direction.length();
+
+        // Create several dark tendrils extending from random points along the beam
+        int numTendrils = 6 + (int)(Math.random() * 4);
+
+        for (int tendril = 0; tendril < numTendrils; tendril++) {
+            // Random point along the beam
+            double t = 0.2 + Math.random() * 0.6; // Avoid start/end
+            Vec3 tendrilStart = start.add(direction.scale(t));
+
+            // Random direction for tendril
+            Vec3 tendrilDir = new Vec3(
+                    (Math.random() - 0.5) * 2,
+                    (Math.random() - 0.5) * 2,
+                    (Math.random() - 0.5) * 2
+            ).normalize();
+
+            double tendrilLength = width * (1.5 + Math.random() * 1.0);
+            Vec3 tendrilEnd = tendrilStart.add(tendrilDir.scale(tendrilLength));
+
+            // Create curved tendril path
+            List<Vec3> tendrilPoints = new ArrayList<>();
+            int segments = 5;
+
+            for (int i = 0; i <= segments; i++) {
+                double segmentT = (double) i / segments;
+
+                // Add curve using sine wave
+                Vec3 basePos = tendrilStart.add(tendrilDir.scale(tendrilLength * segmentT));
+                Vec3 curveOffset = tendrilDir.cross(direction.normalize()).normalize()
+                        .scale(Math.sin(segmentT * Math.PI) * width * 0.3);
+
+                tendrilPoints.add(basePos.add(curveOffset));
+            }
+
+            VectorRenderer.drawPolylineWorld(
+                    tendrilPoints, VOID_COLOR,
+                    0.2f, false, duration + tendril * 2, null
+            );
+        }
+    }
+
+    /**
+     * Creates an impressive sculk-themed explosion at impact
+     */
+    private static void renderSculkImpactExplosion(Vec3 impact, double width, int hitCount, int duration) {
+        // Main sculk explosion blast
+        VectorRenderer.drawSphereWorld(
+                impact, (float)(width * 1.5), BEAM_CORE_COLOR,
+                16, 12, false, duration / 2, null
+        );
+
+        // Expanding darkness waves
+        for (int wave = 0; wave < 5; wave++) {
+            float delay = wave * 3f;
+            float waveSize = (float)(width * (2.0 + wave * 1.2));
+            int waveAlpha = Math.max(0x22, 0x88 - wave * 0x15);
+            int waveColor = (waveAlpha << 24) | (DARKNESS_COLOR & 0xFFFFFF);
+
+            VectorRenderer.drawSphereWorld(
+                    impact, waveSize, waveColor,
+                    20, 15, false, (duration / 3) + (int)delay, null
+            );
+        }
+
+        // Sculk spikes shooting outward
+        int spikeCount = Math.min(hitCount * 4, 20);
+        for (int spike = 0; spike < spikeCount; spike++) {
+            // Random direction for spike
+            double theta = Math.random() * 2 * Math.PI;
+            double phi = Math.random() * Math.PI;
+            double spikeLength = width * (2.0 + Math.random() * 2.0);
+
+            Vec3 spikeDir = new Vec3(
+                    Math.sin(phi) * Math.cos(theta),
+                    Math.cos(phi),
+                    Math.sin(phi) * Math.sin(theta)
+            );
+
+            Vec3 spikeEnd = impact.add(spikeDir.scale(spikeLength));
+
+            VectorRenderer.drawLineWorld(
+                    impact, spikeEnd, SCULK_PULSE_COLOR,
+                    0.25f, false, duration + spike, null
+            );
+        }
+
+        // Floating void fragments
+        int fragmentCount = hitCount * 6;
+        for (int frag = 0; frag < fragmentCount; frag++) {
+            Vec3 fragPos = impact.add(
+                    (Math.random() - 0.5) * width * 3,
+                    (Math.random() - 0.5) * width * 3,
+                    (Math.random() - 0.5) * width * 3
+            );
+
+            float fragSize = 0.15f + (float)(Math.random() * 0.25f);
+            int fragColor = Math.random() > 0.5 ? VOID_COLOR : DARKNESS_COLOR;
+
+            VectorRenderer.drawSphereWorld(
+                    fragPos, fragSize, fragColor,
+                    6, 6, false, duration + (int)(Math.random() * 15), null
+            );
+        }
+    }
+
+    /**
+     * Creates atmospheric darkness particles around the entire beam
+     */
+    private static void renderDarknessAtmosphere(Vec3 start, Vec3 end, double width, int duration) {
+        Vec3 direction = end.subtract(start);
+        double length = direction.length();
+
+        // Dense atmospheric particles
+        int numParticles = (int)(length * 2); // Two particles per block
 
         for (int i = 0; i < numParticles; i++) {
             double t = Math.random();
             Vec3 basePos = start.add(direction.scale(t));
 
-            // Random offset around the beam
-            double particleDistance = width * (0.8 + Math.random() * 0.6);
+            // Create layered atmosphere around the beam
+            double atmosphereRadius = width * (1.2 + Math.random() * 0.8);
             double angle = Math.random() * 2 * Math.PI;
-            double height = (Math.random() - 0.5) * width;
+            double height = (Math.random() - 0.5) * width * 1.5;
 
             Vec3 particlePos = basePos.add(
-                    Math.cos(angle) * particleDistance,
+                    Math.cos(angle) * atmosphereRadius,
                     height,
-                    Math.sin(angle) * particleDistance
+                    Math.sin(angle) * atmosphereRadius
             );
 
-            float particleSize = 0.1f + (float)(Math.random() * 0.2f);
-            int particleColor = Math.random() > 0.6 ? PARTICLE_BRIGHT : PARTICLE_DIM;
+            float particleSize = 0.08f + (float)(Math.random() * 0.12f);
+
+            // Vary colors for atmospheric depth
+            int particleColor;
+            double rand = Math.random();
+            if (rand < 0.3) particleColor = VOID_COLOR;
+            else if (rand < 0.6) particleColor = DARKNESS_COLOR;
+            else particleColor = SCULK_PULSE_COLOR;
 
             VectorRenderer.drawSphereWorld(
                     particlePos, particleSize, particleColor,
-                    6, 6, false, duration + (int)(Math.random() * 15), null
+                    6, 6, false, duration + (int)(Math.random() * 20), null
             );
         }
     }
