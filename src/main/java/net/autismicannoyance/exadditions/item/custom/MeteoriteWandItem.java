@@ -1,4 +1,4 @@
-package net.autismicannoyance.exadditions.item;
+package net.autismicannoyance.exadditions.item.custom;
 
 import net.autismicannoyance.exadditions.network.ModNetworking;
 import net.autismicannoyance.exadditions.network.MeteoriteEffectPacket;
@@ -13,7 +13,6 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.damagesource.DamageSource;
-import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
@@ -34,48 +33,27 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Meteorite Wand - Summons devastating meteorite storms from the heavens
- * Creates 5-15 meteors with varied sizes and massive destructive power
+ * Creates massive amounts of meteors with varied sizes and destructive power
  */
-public class MeteoriteWand extends Item {
+public class MeteoriteWandItem extends Item {
 
     // Cooldown tracking per player
     private static final ConcurrentHashMap<UUID, Long> COOLDOWNS = new ConcurrentHashMap<>();
-    private static final long COOLDOWN_MS = 30000; // 30 second cooldown
+    private static final long COOLDOWN_MS = 20000; // 20 second cooldown
 
     // Active meteors for damage tracking
     private static final ConcurrentHashMap<Integer, ActiveMeteorite> ACTIVE_METEORS = new ConcurrentHashMap<>();
     private static int nextMeteorId = 0;
 
-    // Meteorite sizes and properties
+    // Enhanced meteorite sizes and properties
+    private static final MeteoriteType TINY = new MeteoriteType(1.0f, 25f, 5f, 0x70FF4500, 0x50FF3000);
     private static final MeteoriteType SMALL = new MeteoriteType(1.5f, 40f, 8f, 0x80FF6B00, 0x60FF4500);
     private static final MeteoriteType MEDIUM = new MeteoriteType(2.5f, 80f, 15f, 0x90FF8C00, 0x70FF6500);
     private static final MeteoriteType LARGE = new MeteoriteType(4.0f, 150f, 25f, 0xA0FFAA00, 0x80FF8500);
+    private static final MeteoriteType MASSIVE = new MeteoriteType(6.0f, 250f, 40f, 0xB0FFCC00, 0x90FFA500);
 
-    public MeteoriteWand(Properties properties) {
+    public MeteoriteWandItem(Properties properties) {
         super(properties);
-    }
-
-    // Helper method to schedule delayed tasks
-    private void scheduleDelayedTask(ServerLevel level, Runnable task, int delayTicks) {
-        level.getServer().execute(() -> {
-            // Create a simple delayed execution using server tick counter
-            final int targetTick = level.getServer().getTickCount() + delayTicks;
-
-            // Use a repeating check until we reach the target tick
-            Runnable delayedExecution = new Runnable() {
-                @Override
-                public void run() {
-                    if (level.getServer().getTickCount() >= targetTick) {
-                        task.run();
-                    } else {
-                        // Schedule another check next tick
-                        level.getServer().execute(this);
-                    }
-                }
-            };
-
-            level.getServer().execute(delayedExecution);
-        });
     }
 
     @Override
@@ -113,46 +91,67 @@ public class MeteoriteWand extends Item {
         RandomSource random = level.getRandom();
         Vec3 casterPos = caster.position();
 
-        // Determine number of meteors (5-15)
-        int meteorCount = 5 + random.nextInt(11);
+        // Increased number of meteors (20-50)
+        int meteorCount = 20 + random.nextInt(31);
 
-        // Calculate distribution
-        int largeMeteors = Math.max(1, meteorCount / 10); // At least 1, about 10%
-        int mediumMeteors = (meteorCount - largeMeteors) * 40 / 100; // 40% of remaining
-        int smallMeteors = meteorCount - largeMeteors - mediumMeteors; // Rest are small
+        // Enhanced distribution
+        int massiveMeteors = Math.max(1, meteorCount / 20); // 5%
+        int largeMeteors = Math.max(1, meteorCount / 15);   // ~7%
+        int mediumMeteors = (meteorCount - massiveMeteors - largeMeteors) * 25 / 100; // 25% of remaining
+        int smallMeteors = (meteorCount - massiveMeteors - largeMeteors - mediumMeteors) * 40 / 100; // 40% of remaining
+        int tinyMeteors = meteorCount - massiveMeteors - largeMeteors - mediumMeteors - smallMeteors; // Rest are tiny
 
-        caster.displayClientMessage(Component.literal("§6Summoning " + meteorCount + " meteors from the heavens!"), false);
+        caster.displayClientMessage(Component.literal("§6§lSummoning " + meteorCount + " meteors from the cosmic void!"), false);
+        caster.displayClientMessage(Component.literal("§c§lMassive: " + massiveMeteors + " | Large: " + largeMeteors + " | Medium: " + mediumMeteors + " | Small: " + smallMeteors + " | Tiny: " + tinyMeteors), false);
 
-        // Play dramatic sound
+        // Play dramatic sound sequence
         level.playSound(null, caster.blockPosition(), SoundEvents.LIGHTNING_BOLT_THUNDER,
-                SoundSource.PLAYERS, 1.5f, 0.5f);
+                SoundSource.PLAYERS, 2.0f, 0.3f);
 
-        // Spawn warning particles around caster
-        for (int i = 0; i < 50; i++) {
+        // Secondary sound for dramatic effect
+        level.getServer().execute(() -> {
+            try { Thread.sleep(500); } catch (InterruptedException e) {}
+            level.playSound(null, caster.blockPosition(), SoundEvents.WITHER_SPAWN,
+                    SoundSource.PLAYERS, 1.5f, 0.8f);
+        });
+
+        // Enhanced warning particles around caster
+        for (int i = 0; i < 100; i++) {
             double angle = random.nextDouble() * Math.PI * 2;
-            double radius = 3 + random.nextDouble() * 5;
+            double radius = 5 + random.nextDouble() * 10;
             double x = casterPos.x + Math.cos(angle) * radius;
             double z = casterPos.z + Math.sin(angle) * radius;
-            level.sendParticles(ParticleTypes.FLAME, x, casterPos.y + 1, z, 1, 0, 0.5, 0, 0.1);
+            level.sendParticles(ParticleTypes.SOUL_FIRE_FLAME, x, casterPos.y + 1 + random.nextDouble() * 3, z,
+                    1, 0, 0.8, 0, 0.15);
         }
 
-        // Schedule meteors with delays for dramatic effect
-        scheduleMeteorites(level, caster, largeMeteors, LARGE, 0);
-        scheduleMeteorites(level, caster, mediumMeteors, MEDIUM, 20); // 1 second delay
-        scheduleMeteorites(level, caster, smallMeteors, SMALL, 40); // 2 second delay
+        // Schedule meteors with staggered timing for maximum chaos
+        scheduleMeteorites(level, caster, massiveMeteors, MASSIVE, 0);
+        scheduleMeteorites(level, caster, largeMeteors, LARGE, 10);
+        scheduleMeteorites(level, caster, mediumMeteors, MEDIUM, 20);
+        scheduleMeteorites(level, caster, smallMeteors, SMALL, 30);
+        scheduleMeteorites(level, caster, tinyMeteors, TINY, 40);
     }
 
     private void scheduleMeteorites(ServerLevel level, Player caster, int count, MeteoriteType type, int baseDelay) {
         RandomSource random = level.getRandom();
 
         for (int i = 0; i < count; i++) {
-            int delay = baseDelay + i * 5 + random.nextInt(15); // Spread them out
+            int delay = baseDelay + i * 3 + random.nextInt(10); // Faster spawn rate
 
+            final int finalI = i;
             level.getServer().execute(() -> {
-                // Schedule with delay
-                level.getServer().tell(new net.minecraft.server.TickTask(level.getServer().getTickCount() + delay, () -> {
-                    spawnSingleMeteorite(level, caster, type);
-                }));
+                level.getServer().execute(() -> {
+                    if (level.getServer().getTickCount() >= delay) {
+                        spawnSingleMeteorite(level, caster, type);
+                    } else {
+                        // Reschedule
+                        level.getServer().execute(() -> {
+                            try { Thread.sleep(delay * 50L); } catch (InterruptedException e) {}
+                            spawnSingleMeteorite(level, caster, type);
+                        });
+                    }
+                });
             });
         }
     }
@@ -161,9 +160,9 @@ public class MeteoriteWand extends Item {
         RandomSource random = level.getRandom();
         Vec3 casterPos = caster.position();
 
-        // Random position around caster (40-80 blocks away)
+        // Extended range for more chaos (60-120 blocks away)
         double angle = random.nextDouble() * Math.PI * 2;
-        double distance = 40 + random.nextDouble() * 40;
+        double distance = 60 + random.nextDouble() * 60;
         double targetX = casterPos.x + Math.cos(angle) * distance;
         double targetZ = casterPos.z + Math.sin(angle) * distance;
 
@@ -177,35 +176,36 @@ public class MeteoriteWand extends Item {
             }
         }
 
-        // Start position high in the sky
-        Vec3 startPos = new Vec3(targetX + random.nextGaussian() * 5, targetPos.getY() + 60 + random.nextDouble() * 40,
-                targetZ + random.nextGaussian() * 5);
+        // Start position much higher in the sky
+        Vec3 startPos = new Vec3(targetX + random.nextGaussian() * 10,
+                targetPos.getY() + 80 + random.nextDouble() * 60,
+                targetZ + random.nextGaussian() * 10);
         Vec3 endPos = new Vec3(targetPos.getX(), targetPos.getY(), targetPos.getZ());
 
-        // Calculate velocity based on distance and desired travel time
+        // Calculate velocity
         Vec3 trajectory = endPos.subtract(startPos);
-        double travelTime = 3.0 + random.nextDouble() * 2.0; // 3-5 seconds
-        Vec3 velocity = trajectory.scale(1.0 / (travelTime * 20)); // Convert to per-tick velocity
+        double travelTime = 2.0 + random.nextDouble() * 3.0; // 2-5 seconds
+        Vec3 velocity = trajectory.scale(1.0 / (travelTime * 20));
 
-        // Add some random variation to velocity
+        // Add more velocity variation
         velocity = velocity.add(
+                (random.nextDouble() - 0.5) * 0.2,
                 (random.nextDouble() - 0.5) * 0.1,
-                (random.nextDouble() - 0.5) * 0.05,
-                (random.nextDouble() - 0.5) * 0.1
+                (random.nextDouble() - 0.5) * 0.2
         );
 
         int meteorId = nextMeteorId++;
-        int lifetimeTicks = (int)(travelTime * 20) + 20; // Add buffer
+        int lifetimeTicks = (int)(travelTime * 20) + 30;
 
         // Create active meteorite for damage tracking
         ActiveMeteorite activeMeteor = new ActiveMeteorite(meteorId, startPos, endPos, velocity,
                 type, caster.getUUID(), lifetimeTicks);
         ACTIVE_METEORS.put(meteorId, activeMeteor);
 
-        // Start damage tick task
+        // Start damage tracking
         startMeteoriteDamageTracking(level, activeMeteor);
 
-        // Send packet to all nearby clients
+        // Send packet to clients
         MeteoriteEffectPacket packet = new MeteoriteEffectPacket(
                 startPos, endPos, velocity, type.size, lifetimeTicks, meteorId,
                 true, type.coreColor, type.trailColor, 1.0f
@@ -213,93 +213,88 @@ public class MeteoriteWand extends Item {
 
         ModNetworking.CHANNEL.send(
                 PacketDistributor.NEAR.with(() -> new PacketDistributor.TargetPoint(
-                        startPos.x, startPos.y, startPos.z, 200, level.dimension()
+                        startPos.x, startPos.y, startPos.z, 300, level.dimension()
                 )), packet
         );
 
-        // Play whoosh sound
+        // Enhanced sound effects
         level.playSound(null, new BlockPos((int)startPos.x, (int)startPos.y, (int)startPos.z),
-                SoundEvents.FIREWORK_ROCKET_LAUNCH, SoundSource.HOSTILE, 2.0f, 0.3f + random.nextFloat() * 0.4f);
+                SoundEvents.FIREWORK_ROCKET_LAUNCH, SoundSource.HOSTILE,
+                1.0f + (type.size / 4.0f), 0.2f + random.nextFloat() * 0.6f);
     }
 
     private void startMeteoriteDamageTracking(ServerLevel level, ActiveMeteorite meteor) {
-        // Schedule damage checks throughout the meteorite's flight
-        for (int tick = 0; tick < meteor.lifetimeTicks; tick += 2) { // Check every 2 ticks
+        // More frequent damage checks for better collision detection
+        for (int tick = 0; tick < meteor.lifetimeTicks; tick += 1) {
             final int currentTick = tick;
 
-            level.getServer().tell(new net.minecraft.server.TickTask(level.getServer().getTickCount() + tick, () -> {
+            level.getServer().execute(() -> {
+                // Simple delay simulation
+                try { Thread.sleep(currentTick * 50L); } catch (InterruptedException e) {}
+
                 if (!ACTIVE_METEORS.containsKey(meteor.id)) return;
 
-                float progress = (float) currentTick / meteor.lifetimeTicks;
+                float progress = Math.min(1.0f, (float) currentTick / meteor.lifetimeTicks);
                 Vec3 currentPos = meteor.startPos.lerp(meteor.endPos, progress);
 
-                // Check for entities in meteorite path (smaller radius during flight)
-                double flightRadius = meteor.type.size * 0.3;
+                // Enhanced collision detection
+                double flightRadius = meteor.type.size * 0.4;
                 AABB searchBox = new AABB(currentPos.subtract(flightRadius, flightRadius, flightRadius),
                         currentPos.add(flightRadius, flightRadius, flightRadius));
 
                 List<Entity> entitiesInPath = level.getEntitiesOfClass(Entity.class, searchBox);
                 for (Entity entity : entitiesInPath) {
                     if (entity instanceof LivingEntity living && !meteor.hitEntities.contains(entity.getUUID())) {
-                        // Don't damage the caster
                         if (!entity.getUUID().equals(meteor.casterId)) {
                             meteor.hitEntities.add(entity.getUUID());
 
-                            // Flight damage (reduced)
-                            float flightDamage = meteor.type.damage * 0.3f;
+                            // Enhanced flight damage
+                            float flightDamage = meteor.type.damage * 0.4f;
                             DamageSource damageSource = level.damageSources().magic();
                             living.hurt(damageSource, flightDamage);
 
-                            // Knockback effect
-                            Vec3 knockback = meteor.velocity.normalize().scale(0.5);
+                            // Stronger knockback
+                            Vec3 knockback = meteor.velocity.normalize().scale(0.8);
                             living.setDeltaMovement(living.getDeltaMovement().add(knockback));
 
-                            // Fire effect for larger meteors
-                            if (meteor.type.size > 2.0f) {
-                                living.setSecondsOnFire(3);
+                            // Enhanced fire effects
+                            if (meteor.type.size > 1.5f) {
+                                living.setSecondsOnFire((int)(meteor.type.size * 2));
                             }
                         }
                     }
                 }
 
-                // Impact detection (close to ground)
-                if (progress > 0.95f) {
+                // Impact detection
+                if (progress > 0.9f || currentTick >= meteor.lifetimeTicks - 5) {
                     performMeteoriteImpact(level, meteor);
                     ACTIVE_METEORS.remove(meteor.id);
                 }
-            }));
+            });
         }
 
-        // Cleanup after lifetime expires
-        level.getServer().tell(new net.minecraft.server.TickTask(level.getServer().getTickCount() + meteor.lifetimeTicks + 20, () -> {
+        // Cleanup
+        level.getServer().execute(() -> {
+            try { Thread.sleep((meteor.lifetimeTicks + 40) * 50L); } catch (InterruptedException e) {}
             ACTIVE_METEORS.remove(meteor.id);
-        }));
+        });
     }
 
     private void performMeteoriteImpact(ServerLevel level, ActiveMeteorite meteor) {
         Vec3 impactPos = meteor.endPos;
         BlockPos impactBlock = new BlockPos((int)impactPos.x, (int)impactPos.y, (int)impactPos.z);
 
-        // Impact sound
+        // Enhanced impact sound
         level.playSound(null, impactBlock, SoundEvents.GENERIC_EXPLODE, SoundSource.HOSTILE,
-                3.0f * meteor.type.size / 4.0f, 0.1f);
+                4.0f * meteor.type.size / 3.0f, 0.05f + meteor.type.size * 0.05f);
 
-        // Screen shake effect for nearby players
-        double shakeRadius = meteor.type.explosionRadius * 2;
-        for (ServerPlayer player : level.players()) {
-            if (player.position().distanceTo(impactPos) <= shakeRadius) {
-                // Send particles to create screen shake effect
-                for (int i = 0; i < 20; i++) {
-                    level.sendParticles(ParticleTypes.EXPLOSION,
-                            impactPos.x + (level.random.nextGaussian() * 3),
-                            impactPos.y + level.random.nextDouble() * 3,
-                            impactPos.z + (level.random.nextGaussian() * 3),
-                            1, 0, 0, 0, 0);
-                }
-            }
+        // Additional impact sounds for larger meteors
+        if (meteor.type.size > 3.0f) {
+            level.playSound(null, impactBlock, SoundEvents.DRAGON_FIREBALL_EXPLODE, SoundSource.HOSTILE,
+                    3.0f, 0.3f);
         }
 
-        // Entity damage in explosion radius
+        // Enhanced entity damage
         AABB explosionBox = new AABB(impactPos.subtract(meteor.type.explosionRadius, meteor.type.explosionRadius, meteor.type.explosionRadius),
                 impactPos.add(meteor.type.explosionRadius, meteor.type.explosionRadius, meteor.type.explosionRadius));
 
@@ -308,55 +303,47 @@ public class MeteoriteWand extends Item {
             if (entity instanceof LivingEntity living && !entity.getUUID().equals(meteor.casterId)) {
                 double distance = entity.position().distanceTo(impactPos);
                 if (distance <= meteor.type.explosionRadius) {
-                    // Calculate damage falloff
-                    double damageFactor = 1.0 - (distance / meteor.type.explosionRadius);
-                    damageFactor = Math.max(0.1, damageFactor); // Minimum 10% damage
-
+                    double damageFactor = Math.max(0.2, 1.0 - (distance / meteor.type.explosionRadius));
                     float explosionDamage = meteor.type.damage * (float)damageFactor;
 
                     DamageSource damageSource = level.damageSources().explosion(null, null);
                     living.hurt(damageSource, explosionDamage);
 
-                    // Strong knockback
+                    // Enhanced knockback
                     Vec3 knockbackDir = entity.position().subtract(impactPos).normalize();
-                    double knockbackStrength = (meteor.type.size / 2.0) * damageFactor;
+                    double knockbackStrength = (meteor.type.size / 1.5) * damageFactor;
                     living.setDeltaMovement(living.getDeltaMovement().add(knockbackDir.scale(knockbackStrength)));
 
-                    // Fire effect
-                    int fireTime = (int)(meteor.type.size * 2);
+                    // Extended fire effects
+                    int fireTime = Math.max(5, (int)(meteor.type.size * 3));
                     living.setSecondsOnFire(fireTime);
                 }
             }
         }
 
-        // Environmental destruction
+        // Enhanced environmental destruction
         createMeteorCrater(level, impactBlock, meteor.type);
-
-        // Spawn impact particles
         spawnImpactEffects(level, impactPos, meteor.type);
     }
 
     private void createMeteorCrater(ServerLevel level, BlockPos center, MeteoriteType type) {
-        int radius = (int)(type.size * 1.5); // Crater radius based on meteorite size
+        int radius = Math.max(3, (int)(type.size * 2.0)); // Larger craters
 
-        // Create spherical crater
         for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius/2; y <= radius/4; y++) { // Shallower crater
+            for (int y = -radius/2; y <= radius/3; y++) {
                 for (int z = -radius; z <= radius; z++) {
-                    double distance = Math.sqrt(x*x + y*y*2 + z*z); // Elliptical shape
+                    double distance = Math.sqrt(x*x + y*y*1.5 + z*z);
 
                     if (distance <= radius) {
                         BlockPos pos = center.offset(x, y, z);
                         BlockState currentState = level.getBlockState(pos);
 
-                        // Don't break bedrock or other indestructible blocks
                         if (!currentState.isAir() && currentState.getDestroySpeed(level, pos) >= 0) {
-                            // Chance to destroy block based on distance from center
-                            double destroyChance = 1.0 - (distance / radius);
+                            double destroyChance = Math.max(0.3, 1.2 - (distance / radius));
 
                             if (level.random.nextDouble() < destroyChance) {
-                                // Drop items sometimes
-                                if (level.random.nextDouble() < 0.3 && destroyChance > 0.5) {
+                                // More frequent item drops
+                                if (level.random.nextDouble() < 0.4 && destroyChance > 0.4) {
                                     currentState.getBlock().popResource(level, pos, new ItemStack(currentState.getBlock()));
                                 }
 
@@ -368,9 +355,10 @@ public class MeteoriteWand extends Item {
             }
         }
 
-        // Add some fire blocks for larger meteors
-        if (type.size > 2.0f) {
-            for (int i = 0; i < radius * 2; i++) {
+        // Enhanced fire placement
+        if (type.size > 1.0f) {
+            int fireCount = (int)(radius * type.size);
+            for (int i = 0; i < fireCount; i++) {
                 int x = level.random.nextInt(radius * 2) - radius;
                 int z = level.random.nextInt(radius * 2) - radius;
                 if (x*x + z*z <= radius*radius) {
@@ -385,52 +373,55 @@ public class MeteoriteWand extends Item {
 
     private void spawnImpactEffects(ServerLevel level, Vec3 pos, MeteoriteType type) {
         RandomSource random = level.random;
-        int particleCount = (int)(type.size * 30);
+        int particleCount = (int)(type.size * 50); // More particles
 
-        // Explosion particles
+        // Enhanced explosion particles
         for (int i = 0; i < particleCount; i++) {
-            double offsetX = random.nextGaussian() * type.explosionRadius * 0.3;
-            double offsetY = random.nextDouble() * type.explosionRadius * 0.5;
-            double offsetZ = random.nextGaussian() * type.explosionRadius * 0.3;
+            double offsetX = random.nextGaussian() * type.explosionRadius * 0.4;
+            double offsetY = random.nextDouble() * type.explosionRadius * 0.6;
+            double offsetZ = random.nextGaussian() * type.explosionRadius * 0.4;
 
-            level.sendParticles(ParticleTypes.EXPLOSION,
+            level.sendParticles(ParticleTypes.EXPLOSION_EMITTER,
                     pos.x + offsetX, pos.y + offsetY, pos.z + offsetZ,
                     1, 0, 0, 0, 0);
         }
 
-        // Fire and smoke particles
-        for (int i = 0; i < particleCount * 2; i++) {
+        // Enhanced fire and smoke effects
+        for (int i = 0; i < particleCount * 3; i++) {
             double offsetX = random.nextGaussian() * type.explosionRadius;
             double offsetY = random.nextDouble() * type.explosionRadius;
             double offsetZ = random.nextGaussian() * type.explosionRadius;
 
             if (random.nextBoolean()) {
-                level.sendParticles(ParticleTypes.FLAME,
+                level.sendParticles(ParticleTypes.SOUL_FIRE_FLAME,
+                        pos.x + offsetX, pos.y + offsetY, pos.z + offsetZ,
+                        1, random.nextGaussian() * 0.2, random.nextDouble() * 0.3, random.nextGaussian() * 0.2, 0.1);
+            } else {
+                level.sendParticles(ParticleTypes.CAMPFIRE_COSY_SMOKE,
                         pos.x + offsetX, pos.y + offsetY, pos.z + offsetZ,
                         1, random.nextGaussian() * 0.1, random.nextDouble() * 0.2, random.nextGaussian() * 0.1, 0.05);
-            } else {
-                level.sendParticles(ParticleTypes.LARGE_SMOKE,
-                        pos.x + offsetX, pos.y + offsetY, pos.z + offsetZ,
-                        1, random.nextGaussian() * 0.05, random.nextDouble() * 0.1, random.nextGaussian() * 0.05, 0.02);
             }
         }
     }
 
     @Override
     public void appendHoverText(ItemStack stack, Level level, List<Component> tooltip, TooltipFlag flag) {
-        tooltip.add(Component.literal("§6Summons a devastating meteorite storm"));
-        tooltip.add(Component.literal("§75-15 meteors rain from the heavens"));
-        tooltip.add(Component.literal("§cDeals massive AOE damage and destruction"));
-        tooltip.add(Component.literal("§930 second cooldown"));
+        tooltip.add(Component.literal("§6§lSummons an apocalyptic meteorite storm"));
+        tooltip.add(Component.literal("§7§l20-50 meteors rain from the cosmic void"));
+        tooltip.add(Component.literal("§c§lDeals catastrophic AOE damage"));
+        tooltip.add(Component.literal("§4§lMassive environmental destruction"));
+        tooltip.add(Component.literal("§9§l20 second cooldown"));
+        tooltip.add(Component.literal(""));
+        tooltip.add(Component.literal("§8\"When the stars fall, worlds end.\""));
         super.appendHoverText(stack, level, tooltip, flag);
     }
 
     @Override
     public boolean isFoil(ItemStack stack) {
-        return true; // Always enchanted glow
+        return true;
     }
 
-    // Data classes
+    // Enhanced data classes
     private static class MeteoriteType {
         final float size;
         final float damage;

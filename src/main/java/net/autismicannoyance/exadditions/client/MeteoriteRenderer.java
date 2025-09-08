@@ -1,347 +1,318 @@
 package net.autismicannoyance.exadditions.client;
 
-import net.autismicannoyance.exadditions.client.VectorRenderer;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.particle.Particle;
+import net.minecraft.client.particle.ParticleEngine;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.util.Mth;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.client.event.RenderLevelStageEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.util.RandomSource;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Client-side meteorite renderer that creates stunning visual effects with enhanced comet trails
+ * Enhanced meteorite renderer that creates realistic falling meteors with proper trails
  */
+@OnlyIn(Dist.CLIENT)
 public class MeteoriteRenderer {
-    // Track active meteorites to manage their trail systems
+
     private static final Map<Integer, MeteoriteInstance> activeMeteorites = new ConcurrentHashMap<>();
+    private static final Random random = new Random();
 
     public static void spawnMeteorite(Vec3 startPos, Vec3 endPos, Vec3 velocity, float size,
                                       int lifetimeTicks, int meteoriteId, boolean hasTrail,
                                       int coreColor, int trailColor, float intensity) {
 
-        // Create meteorite instance
         MeteoriteInstance meteorite = new MeteoriteInstance(
                 startPos, endPos, velocity, size, lifetimeTicks,
-                hasTrail, coreColor, trailColor, intensity
+                hasTrail, coreColor, trailColor, intensity, System.currentTimeMillis()
         );
 
         activeMeteorites.put(meteoriteId, meteorite);
-
-        // Start the rendering process
-        renderMeteorite(meteorite, lifetimeTicks);
     }
 
-    private static void renderMeteorite(MeteoriteInstance meteorite, int lifetimeTicks) {
-        Vec3 direction = meteorite.velocity.normalize();
-        double speed = meteorite.velocity.length();
+    @SubscribeEvent
+    public static void onRenderLevel(RenderLevelStageEvent event) {
+        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) return;
 
-        // Enhanced trail system - create multiple trail segments with different properties
+        Minecraft mc = Minecraft.getInstance();
+        ClientLevel level = mc.level;
+        if (level == null) return;
+
+        long currentTime = System.currentTimeMillis();
+        Iterator<Map.Entry<Integer, MeteoriteInstance>> iterator = activeMeteorites.entrySet().iterator();
+
+        while (iterator.hasNext()) {
+            Map.Entry<Integer, MeteoriteInstance> entry = iterator.next();
+            MeteoriteInstance meteorite = entry.getValue();
+
+            long elapsed = currentTime - meteorite.spawnTime;
+            float progress = Math.min(1.0f, elapsed / (meteorite.lifetimeTicks * 50.0f));
+
+            if (progress >= 1.0f) {
+                // Meteorite has reached the ground
+                createImpactEffects(level, meteorite.endPos, meteorite.size);
+                iterator.remove();
+                continue;
+            }
+
+            // Calculate current position
+            Vec3 currentPos = meteorite.startPos.lerp(meteorite.endPos, progress);
+
+            // Render the meteorite and its trail
+            renderMeteoriteWithTrail(level, meteorite, currentPos, progress);
+        }
+    }
+
+    private static void renderMeteoriteWithTrail(ClientLevel level, MeteoriteInstance meteorite, Vec3 currentPos, float progress) {
+        // Determine trail color based on meteorite size
+        boolean isLarge = meteorite.size > 3.0f;
+        boolean isMedium = meteorite.size > 2.0f;
+
+        // Create trail particles behind the meteorite
         if (meteorite.hasTrail) {
-            renderCometTrail(meteorite, direction, speed, lifetimeTicks);
+            createTrailParticles(level, meteorite, currentPos, isLarge, isMedium);
         }
 
-        // Render the main meteorite core
-        renderMeteoriteCore(meteorite, direction, speed, lifetimeTicks);
+        // Create the main meteorite body particles
+        createMeteoriteCore(level, currentPos, meteorite.size, isLarge, isMedium);
+
+        // Add debris particles around the meteorite
+        createDebrisParticles(level, currentPos, meteorite.size);
     }
 
-    private static void renderCometTrail(MeteoriteInstance meteorite, Vec3 direction, double speed, int lifetimeTicks) {
-        Vec3 currentPos = meteorite.startPos;
+    private static void createTrailParticles(ClientLevel level, MeteoriteInstance meteorite, Vec3 currentPos, boolean isLarge, boolean isMedium) {
+        Vec3 direction = meteorite.velocity.normalize();
+        int trailLength = Math.max(8, (int)(meteorite.size * 4));
 
-        // Enhanced trail parameters
-        int trailSegments = Math.max(15, (int)(meteorite.size * 8)); // More segments for larger meteorites
-        float baseTrailLength = meteorite.size * 4.0f; // Trail length based on meteorite size
+        for (int i = 0; i < trailLength; i++) {
+            float trailProgress = (float) i / trailLength;
+            Vec3 trailPos = currentPos.subtract(direction.scale(trailProgress * meteorite.size * 2));
 
-        // Create layered trail system
-        for (int layer = 0; layer < 3; layer++) {
-            float layerScale = 1.0f - (layer * 0.3f); // Each layer gets smaller
-            float layerAlpha = 1.0f - (layer * 0.4f); // Each layer gets more transparent
-            int layerColor = adjustAlpha(meteorite.trailColor, layerAlpha);
+            // Add some random spread to the trail
+            Vec3 offset = new Vec3(
+                    (random.nextDouble() - 0.5) * meteorite.size * 0.3,
+                    (random.nextDouble() - 0.5) * meteorite.size * 0.3,
+                    (random.nextDouble() - 0.5) * meteorite.size * 0.3
+            );
+            trailPos = trailPos.add(offset);
 
-            createTrailLayer(currentPos, direction, speed, meteorite.size * layerScale,
-                    trailSegments, baseTrailLength * layerScale, lifetimeTicks,
-                    layerColor, layer);
-        }
-
-        // Add particle trail effects
-        createParticleTrail(currentPos, direction, speed, meteorite.size, trailSegments,
-                lifetimeTicks, meteorite.trailColor);
-
-        // Add heat distortion trail (very subtle transparent effect)
-        createHeatDistortionTrail(currentPos, direction, speed, meteorite.size,
-                trailSegments, lifetimeTicks);
-    }
-
-    private static void createTrailLayer(Vec3 startPos, Vec3 direction, double speed, float size,
-                                         int segments, float trailLength, int lifetimeTicks,
-                                         int color, int layerIndex) {
-
-        for (int i = 0; i < segments; i++) {
-            float segmentProgress = (float) i / segments;
-            float segmentAlpha = 1.0f - (segmentProgress * 0.8f); // Fade along the trail
-
-            // Calculate position along the trail
-            Vec3 segmentPos = startPos.add(direction.scale(-segmentProgress * trailLength));
-
-            // Add some slight curve and variation to make the trail more natural
-            double curve = Math.sin(segmentProgress * Math.PI) * 0.3 * size;
-            Vec3 perpendicular = direction.cross(new Vec3(0, 1, 0));
-            if (perpendicular.length() < 0.001) {
-                perpendicular = direction.cross(new Vec3(1, 0, 0));
-            }
-            segmentPos = segmentPos.add(perpendicular.normalize().scale(curve));
-
-            // Size decreases along the trail
-            float segmentSize = size * (1.0f - segmentProgress * 0.7f);
-
-            // Color fades along the trail
-            int segmentColor = adjustAlpha(color, segmentAlpha);
-
-            // Create transform that moves the trail segment
-            VectorRenderer.Transform transform = createMovingTransform(direction, speed, i * 2 + layerIndex * 5);
-
-            // Use different shapes for different layers
-            if (layerIndex == 0) {
-                // Main trail - elongated spheres
-                VectorRenderer.drawSphereWorld(
-                        segmentPos,
-                        segmentSize,
-                        segmentColor,
-                        6, 8,
-                        false,
-                        lifetimeTicks - i,
-                        transform
-                );
-            } else if (layerIndex == 1) {
-                // Secondary trail - smaller, more wispy
-                VectorRenderer.drawSphereWorld(
-                        segmentPos,
-                        segmentSize * 0.7f,
-                        segmentColor,
-                        4, 6,
-                        false,
-                        lifetimeTicks - i,
-                        transform
-                );
+            // Choose trail color based on size
+            if (isLarge) {
+                // Large meteors have blue/white hot trails
+                if (random.nextFloat() < 0.7f) {
+                    level.addParticle(ParticleTypes.SOUL_FIRE_FLAME,
+                            trailPos.x, trailPos.y, trailPos.z, 0, 0, 0);
+                } else {
+                    level.addParticle(ParticleTypes.FLAME,
+                            trailPos.x, trailPos.y, trailPos.z, 0, 0.1, 0);
+                }
+            } else if (isMedium) {
+                // Medium meteors have red/orange trails
+                level.addParticle(ParticleTypes.FLAME,
+                        trailPos.x, trailPos.y, trailPos.z,
+                        (random.nextDouble() - 0.5) * 0.1, 0.05, (random.nextDouble() - 0.5) * 0.1);
             } else {
-                // Outer trail - very wispy and transparent
-                VectorRenderer.drawSphereWorld(
-                        segmentPos,
-                        segmentSize * 1.2f,
-                        adjustAlpha(segmentColor, 0.3f),
-                        3, 4,
-                        false,
-                        lifetimeTicks - i,
-                        transform
-                );
+                // Small meteors have orange/yellow trails
+                if (random.nextFloat() < 0.6f) {
+                    level.addParticle(ParticleTypes.FLAME,
+                            trailPos.x, trailPos.y, trailPos.z, 0, 0.02, 0);
+                } else {
+                    level.addParticle(ParticleTypes.LAVA,
+                            trailPos.x, trailPos.y, trailPos.z, 0, 0, 0);
+                }
+            }
+
+            // Add smoke trail for larger meteors
+            if (meteorite.size > 1.5f && random.nextFloat() < 0.3f) {
+                level.addParticle(ParticleTypes.LARGE_SMOKE,
+                        trailPos.x, trailPos.y, trailPos.z,
+                        (random.nextDouble() - 0.5) * 0.05, 0.01, (random.nextDouble() - 0.5) * 0.05);
             }
         }
     }
 
-    private static void createParticleTrail(Vec3 startPos, Vec3 direction, double speed, float size,
-                                            int segments, int lifetimeTicks, int baseColor) {
+    private static void createMeteoriteCore(ClientLevel level, Vec3 pos, float size, boolean isLarge, boolean isMedium) {
+        // Create the rocky core using multiple particle layers
+        int coreParticles = Math.max(3, (int)(size * 2));
 
-        // Create small particles scattered along the trail
-        int particleCount = segments / 2;
-
-        for (int i = 0; i < particleCount; i++) {
-            float progress = (float) i / particleCount;
-            Vec3 particlePos = startPos.add(direction.scale(-progress * size * 3));
-
-            // Add random offset to particles
-            Vec3 randomOffset = new Vec3(
-                    (Math.random() - 0.5) * size * 0.5,
-                    (Math.random() - 0.5) * size * 0.5,
-                    (Math.random() - 0.5) * size * 0.5
+        for (int i = 0; i < coreParticles; i++) {
+            // Inner core - bright and hot
+            Vec3 coreOffset = new Vec3(
+                    (random.nextDouble() - 0.5) * size * 0.5,
+                    (random.nextDouble() - 0.5) * size * 0.5,
+                    (random.nextDouble() - 0.5) * size * 0.5
             );
-            particlePos = particlePos.add(randomOffset);
+            Vec3 corePos = pos.add(coreOffset);
 
-            float particleSize = size * 0.1f * (1.0f - progress * 0.5f);
-            float particleAlpha = 0.8f - progress * 0.6f;
-            int particleColor = adjustAlpha(brightenColor(baseColor, 1.2f), particleAlpha);
+            if (isLarge) {
+                // Large meteors: Blue-white hot core with soul fire
+                level.addParticle(ParticleTypes.SOUL_FIRE_FLAME,
+                        corePos.x, corePos.y, corePos.z, 0, 0, 0);
+                if (random.nextFloat() < 0.3f) {
+                    level.addParticle(ParticleTypes.WHITE_ASH,
+                            corePos.x, corePos.y, corePos.z, 0, 0, 0);
+                }
+            } else if (isMedium) {
+                // Medium meteors: Red-orange hot core
+                level.addParticle(ParticleTypes.FLAME,
+                        corePos.x, corePos.y, corePos.z, 0, 0, 0);
+                if (random.nextFloat() < 0.2f) {
+                    level.addParticle(ParticleTypes.LAVA,
+                            corePos.x, corePos.y, corePos.z, 0, 0, 0);
+                }
+            } else {
+                // Small meteors: Orange-yellow core
+                if (random.nextFloat() < 0.8f) {
+                    level.addParticle(ParticleTypes.FLAME,
+                            corePos.x, corePos.y, corePos.z, 0, 0, 0);
+                } else {
+                    level.addParticle(ParticleTypes.LAVA,
+                            corePos.x, corePos.y, corePos.z, 0, 0, 0);
+                }
+            }
+        }
 
-            VectorRenderer.Transform transform = createMovingTransform(direction, speed * 0.9, i * 3);
-
-            VectorRenderer.drawSphereWorld(
-                    particlePos,
-                    particleSize,
-                    particleColor,
-                    3, 4,
-                    false,
-                    lifetimeTicks - i * 2,
-                    transform
+        // Outer shell - darker, rocky appearance
+        int shellParticles = Math.max(2, (int)(size * 1.5));
+        for (int i = 0; i < shellParticles; i++) {
+            Vec3 shellOffset = new Vec3(
+                    (random.nextDouble() - 0.5) * size * 0.8,
+                    (random.nextDouble() - 0.5) * size * 0.8,
+                    (random.nextDouble() - 0.5) * size * 0.8
             );
+            Vec3 shellPos = pos.add(shellOffset);
+
+            // Use darker particles for the rocky shell
+            if (random.nextFloat() < 0.6f) {
+                level.addParticle(ParticleTypes.LARGE_SMOKE,
+                        shellPos.x, shellPos.y, shellPos.z,
+                        (random.nextDouble() - 0.5) * 0.02, 0, (random.nextDouble() - 0.5) * 0.02);
+            } else {
+                level.addParticle(ParticleTypes.ASH,
+                        shellPos.x, shellPos.y, shellPos.z, 0, 0, 0);
+            }
         }
     }
 
-    private static void createHeatDistortionTrail(Vec3 startPos, Vec3 direction, double speed, float size,
-                                                  int segments, int lifetimeTicks) {
-
-        // Create subtle heat distortion effect behind the meteorite
-        for (int i = 0; i < segments / 3; i++) {
-            float progress = (float) i / (segments / 3);
-            Vec3 heatPos = startPos.add(direction.scale(-progress * size * 2));
-
-            float heatSize = size * (1.5f - progress * 0.5f);
-            float heatAlpha = 0.15f - progress * 0.1f;
-
-            // Very subtle transparent effect
-            int heatColor = adjustAlpha(0xFFFFAAAA, heatAlpha); // Slight yellow tint
-
-            VectorRenderer.Transform transform = createMovingTransform(direction, speed * 1.1, i);
-
-            VectorRenderer.drawSphereWorld(
-                    heatPos,
-                    heatSize,
-                    heatColor,
-                    4, 6,
-                    false,
-                    lifetimeTicks - i,
-                    transform
-            );
-        }
-    }
-
-    private static void renderMeteoriteCore(MeteoriteInstance meteorite, Vec3 direction, double speed, int lifetimeTicks) {
-        Vec3 corePos = meteorite.startPos;
-
-        // Multi-layered core for maximum visual impact
-        VectorRenderer.Transform coreTransform = createMovingTransform(direction, speed, 0);
-
-        // Outer heat glow - largest, most transparent
-        VectorRenderer.drawSphereWorld(
-                corePos,
-                meteorite.size * 1.8f,
-                adjustAlpha(meteorite.coreColor, 0.2f),
-                8, 10,
-                false,
-                lifetimeTicks,
-                coreTransform
-        );
-
-        // Middle glow layer
-        VectorRenderer.drawSphereWorld(
-                corePos,
-                meteorite.size * 1.3f,
-                adjustAlpha(meteorite.coreColor, 0.4f),
-                10, 12,
-                false,
-                lifetimeTicks,
-                coreTransform
-        );
-
-        // Main solid core
-        VectorRenderer.drawSphereWorld(
-                corePos,
-                meteorite.size,
-                meteorite.coreColor,
-                12, 16,
-                false,
-                lifetimeTicks,
-                coreTransform
-        );
-
-        // Bright inner core
-        VectorRenderer.drawSphereWorld(
-                corePos,
-                meteorite.size * 0.6f,
-                brightenColor(meteorite.coreColor, 1.8f),
-                8, 12,
-                false,
-                lifetimeTicks,
-                coreTransform
-        );
-
-        // Ultra-bright center point
-        VectorRenderer.drawSphereWorld(
-                corePos,
-                meteorite.size * 0.3f,
-                brightenColor(meteorite.coreColor, 2.5f),
-                6, 8,
-                false,
-                lifetimeTicks,
-                coreTransform
-        );
-
-        // Add some debris around the core
-        createCoreDebris(corePos, direction, speed, meteorite.size, lifetimeTicks, meteorite.coreColor);
-    }
-
-    private static void createCoreDebris(Vec3 corePos, Vec3 direction, double speed, float size,
-                                         int lifetimeTicks, int baseColor) {
-
-        int debrisCount = Math.max(4, (int)(size * 3));
+    private static void createDebrisParticles(ClientLevel level, Vec3 pos, float size) {
+        // Create debris particles flying off the meteorite
+        int debrisCount = Math.max(1, (int)(size));
 
         for (int i = 0; i < debrisCount; i++) {
-            // Create debris in a rough sphere around the meteorite
-            double angle = Math.PI * 2 * i / debrisCount;
-            double height = (Math.random() - 0.5) * size * 1.5;
-            double radius = size * (0.8 + Math.random() * 0.6);
-
-            Vec3 debrisOffset = new Vec3(
-                    Math.cos(angle) * radius,
-                    height,
-                    Math.sin(angle) * radius
+            Vec3 debrisVelocity = new Vec3(
+                    (random.nextDouble() - 0.5) * 0.3,
+                    (random.nextDouble() - 0.5) * 0.1,
+                    (random.nextDouble() - 0.5) * 0.3
             );
 
-            Vec3 debrisPos = corePos.add(debrisOffset);
-            float debrisSize = size * 0.08f * (0.5f + (float)Math.random() * 0.5f);
-
-            // Debris moves slightly differently than the main meteorite
-            Vec3 debrisDirection = direction.add(
-                    (Math.random() - 0.5) * 0.15,
-                    (Math.random() - 0.5) * 0.15,
-                    (Math.random() - 0.5) * 0.15
-            ).normalize();
-
-            double debrisSpeed = speed * (0.85 + Math.random() * 0.3);
-
-            VectorRenderer.Transform debrisTransform = createMovingTransform(debrisDirection, debrisSpeed, i * 7);
-
-            VectorRenderer.drawSphereWorld(
-                    debrisPos,
-                    debrisSize,
-                    adjustAlpha(darkenColor(baseColor, 0.6f), 0.7f),
-                    4, 6,
-                    false,
-                    lifetimeTicks - (int)(Math.random() * 15),
-                    debrisTransform
+            Vec3 debrisPos = pos.add(
+                    (random.nextDouble() - 0.5) * size * 1.2,
+                    (random.nextDouble() - 0.5) * size * 1.2,
+                    (random.nextDouble() - 0.5) * size * 1.2
             );
+
+            if (random.nextFloat() < 0.4f) {
+                level.addParticle(ParticleTypes.LAVA,
+                        debrisPos.x, debrisPos.y, debrisPos.z,
+                        debrisVelocity.x, debrisVelocity.y, debrisVelocity.z);
+            } else {
+                level.addParticle(ParticleTypes.FLAME,
+                        debrisPos.x, debrisPos.y, debrisPos.z,
+                        debrisVelocity.x, debrisVelocity.y, debrisVelocity.z);
+            }
         }
     }
 
-    private static VectorRenderer.Transform createMovingTransform(Vec3 direction, double speed, int phase) {
-        // Create a transform that moves the object over time based on velocity
-        Vec3 translation = direction.scale(speed * 0.05); // Adjust movement scale
+    private static void createImpactEffects(ClientLevel level, Vec3 impactPos, float size) {
+        // Create dramatic impact effects when meteorite hits the ground
+        int explosionParticles = Math.max(20, (int)(size * 30));
 
-        return VectorRenderer.Transform.fromEuler(
-                translation,
-                phase * 2.0f, // Slight rotation variation
-                0,
-                0,
-                1.0f,
-                Vec3.ZERO
-        );
-    }
+        for (int i = 0; i < explosionParticles; i++) {
+            Vec3 explosionVel = new Vec3(
+                    (random.nextDouble() - 0.5) * 2.0,
+                    random.nextDouble() * 1.5,
+                    (random.nextDouble() - 0.5) * 2.0
+            ).normalize().scale(random.nextDouble() * size * 0.5);
 
-    // Color utility methods
-    private static int adjustAlpha(int color, float alphaMultiplier) {
-        int alpha = (color >> 24) & 0xFF;
-        int newAlpha = Math.max(0, Math.min(255, (int)(alpha * alphaMultiplier)));
-        return (color & 0x00FFFFFF) | (newAlpha << 24);
-    }
+            Vec3 explosionPos = impactPos.add(
+                    (random.nextDouble() - 0.5) * size,
+                    random.nextDouble() * size * 0.5,
+                    (random.nextDouble() - 0.5) * size
+            );
 
-    private static int brightenColor(int color, float factor) {
-        int a = (color >> 24) & 0xFF;
-        int r = Math.min(255, (int)(((color >> 16) & 0xFF) * factor));
-        int g = Math.min(255, (int)(((color >> 8) & 0xFF) * factor));
-        int b = Math.min(255, (int)((color & 0xFF) * factor));
-        return (a << 24) | (r << 16) | (g << 8) | b;
-    }
+            // Mix of explosion effects based on meteorite size
+            float effectChoice = random.nextFloat();
+            if (size > 3.0f) {
+                // Large meteors - dramatic blue/white explosions
+                if (effectChoice < 0.4f) {
+                    level.addParticle(ParticleTypes.SOUL_FIRE_FLAME,
+                            explosionPos.x, explosionPos.y, explosionPos.z,
+                            explosionVel.x, explosionVel.y, explosionVel.z);
+                } else if (effectChoice < 0.7f) {
+                    level.addParticle(ParticleTypes.EXPLOSION,
+                            explosionPos.x, explosionPos.y, explosionPos.z, 0, 0, 0);
+                } else {
+                    level.addParticle(ParticleTypes.WHITE_ASH,
+                            explosionPos.x, explosionPos.y, explosionPos.z,
+                            explosionVel.x, explosionVel.y, explosionVel.z);
+                }
+            } else if (size > 2.0f) {
+                // Medium meteors - red/orange explosions
+                if (effectChoice < 0.5f) {
+                    level.addParticle(ParticleTypes.FLAME,
+                            explosionPos.x, explosionPos.y, explosionPos.z,
+                            explosionVel.x, explosionVel.y, explosionVel.z);
+                } else if (effectChoice < 0.8f) {
+                    level.addParticle(ParticleTypes.LAVA,
+                            explosionPos.x, explosionPos.y, explosionPos.z,
+                            explosionVel.x * 0.5, explosionVel.y * 0.5, explosionVel.z * 0.5);
+                } else {
+                    level.addParticle(ParticleTypes.EXPLOSION,
+                            explosionPos.x, explosionPos.y, explosionPos.z, 0, 0, 0);
+                }
+            } else {
+                // Small meteors - simple fire explosions
+                if (effectChoice < 0.7f) {
+                    level.addParticle(ParticleTypes.FLAME,
+                            explosionPos.x, explosionPos.y, explosionPos.z,
+                            explosionVel.x, explosionVel.y, explosionVel.z);
+                } else {
+                    level.addParticle(ParticleTypes.LAVA,
+                            explosionPos.x, explosionPos.y, explosionPos.z,
+                            explosionVel.x * 0.3, explosionVel.y * 0.3, explosionVel.z * 0.3);
+                }
+            }
+        }
 
-    private static int darkenColor(int color, float factor) {
-        int a = (color >> 24) & 0xFF;
-        int r = (int)(((color >> 16) & 0xFF) * factor);
-        int g = (int)(((color >> 8) & 0xFF) * factor);
-        int b = (int)((color & 0xFF) * factor);
-        return (a << 24) | (r << 16) | (g << 8) | b;
+        // Add smoke cloud for impact
+        for (int i = 0; i < size * 10; i++) {
+            Vec3 smokeVel = new Vec3(
+                    (random.nextDouble() - 0.5) * 0.2,
+                    random.nextDouble() * 0.3,
+                    (random.nextDouble() - 0.5) * 0.2
+            );
+
+            Vec3 smokePos = impactPos.add(
+                    (random.nextDouble() - 0.5) * size * 2,
+                    random.nextDouble() * size,
+                    (random.nextDouble() - 0.5) * size * 2
+            );
+
+            level.addParticle(ParticleTypes.LARGE_SMOKE,
+                    smokePos.x, smokePos.y, smokePos.z,
+                    smokeVel.x, smokeVel.y, smokeVel.z);
+        }
     }
 
     // Meteorite instance data class
@@ -355,9 +326,10 @@ public class MeteoriteRenderer {
         final int coreColor;
         final int trailColor;
         final float intensity;
+        final long spawnTime;
 
         MeteoriteInstance(Vec3 startPos, Vec3 endPos, Vec3 velocity, float size, int lifetimeTicks,
-                          boolean hasTrail, int coreColor, int trailColor, float intensity) {
+                          boolean hasTrail, int coreColor, int trailColor, float intensity, long spawnTime) {
             this.startPos = startPos;
             this.endPos = endPos;
             this.velocity = velocity;
@@ -367,6 +339,7 @@ public class MeteoriteRenderer {
             this.coreColor = coreColor;
             this.trailColor = trailColor;
             this.intensity = intensity;
+            this.spawnTime = spawnTime;
         }
     }
 }
