@@ -9,9 +9,6 @@ import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
 
-/**
- * Simple network packet for echo beam effects.
- */
 public class EchoBeamPacket {
     private final Vec3 start;
     private final Vec3 end;
@@ -25,31 +22,47 @@ public class EchoBeamPacket {
         this.hitCount = hitCount;
     }
 
-    public static void encode(EchoBeamPacket packet, FriendlyByteBuf buffer) {
-        buffer.writeDouble(packet.start.x);
-        buffer.writeDouble(packet.start.y);
-        buffer.writeDouble(packet.start.z);
-        buffer.writeDouble(packet.end.x);
-        buffer.writeDouble(packet.end.y);
-        buffer.writeDouble(packet.end.z);
-        buffer.writeDouble(packet.beamWidth);
-        buffer.writeInt(packet.hitCount);
+    public static void encode(EchoBeamPacket packet, FriendlyByteBuf buf) {
+        buf.writeDouble(packet.start.x);
+        buf.writeDouble(packet.start.y);
+        buf.writeDouble(packet.start.z);
+        buf.writeDouble(packet.end.x);
+        buf.writeDouble(packet.end.y);
+        buf.writeDouble(packet.end.z);
+        buf.writeDouble(packet.beamWidth);
+        buf.writeInt(packet.hitCount);
     }
 
-    public static EchoBeamPacket decode(FriendlyByteBuf buffer) {
-        Vec3 start = new Vec3(buffer.readDouble(), buffer.readDouble(), buffer.readDouble());
-        Vec3 end = new Vec3(buffer.readDouble(), buffer.readDouble(), buffer.readDouble());
-        double beamWidth = buffer.readDouble();
-        int hitCount = buffer.readInt();
+    public static EchoBeamPacket decode(FriendlyByteBuf buf) {
+        Vec3 start = new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble());
+        Vec3 end = new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble());
+        double beamWidth = buf.readDouble();
+        int hitCount = buf.readInt();
         return new EchoBeamPacket(start, end, beamWidth, hitCount);
     }
 
     public static void handle(EchoBeamPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
-                    EchoBeamManager.addBeam(packet.start, packet.end, packet.beamWidth, packet.hitCount));
-        });
+
+        if (context.getDirection().getReceptionSide().isClient()) {
+            context.enqueueWork(() -> {
+                // This runs on the client side only
+                DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
+                    EchoBeamRenderer.renderEchoBeam(
+                            packet.start,
+                            packet.end,
+                            packet.beamWidth,
+                            packet.hitCount
+                    );
+                });
+            });
+        }
         context.setPacketHandled(true);
     }
+
+    // Getters for packet data
+    public Vec3 getStart() { return start; }
+    public Vec3 getEnd() { return end; }
+    public double getBeamWidth() { return beamWidth; }
+    public int getHitCount() { return hitCount; }
 }
