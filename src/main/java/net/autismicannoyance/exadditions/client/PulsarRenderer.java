@@ -2,380 +2,523 @@ package net.autismicannoyance.exadditions.client;
 
 import net.autismicannoyance.exadditions.item.custom.PulsarCannonItem;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.*;
-import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @OnlyIn(Dist.CLIENT)
 public class PulsarRenderer {
-    // Optimized pulsar visual properties
-    private static final int PULSAR_COLOR_CORE = 0xFFFFFFFF;       // Pure white core
-    private static final int PULSAR_COLOR_PRIMARY = 0xFF00DDFF;    // Cyan-magenta primary
-    private static final int PULSAR_COLOR_SPLIT = 0xFFFF00AA;      // Purple for splits
-    private static final int IMPACT_COLOR_CORE = 0xFFFFFFFF;       // White hot core
-    private static final int IMPACT_COLOR_OUTER = 0xFFFF4400;      // Orange explosion
-    private static final int QUANTUM_SPARK_COLOR = 0xFFAAFFFF;     // Quantum blue
+    // Enhanced photon beam colors with spectrum simulation
+    private static final int PRIMARY_CORE_COLOR = 0xFFFFFFFF;     // Pure white core
+    private static final int PRIMARY_OUTER_COLOR = 0xFF00DDFF;    // Cyan outer glow
+    private static final int SPLIT_CORE_COLOR = 0xFFFF88FF;       // Magenta splits
+    private static final int SPLIT_OUTER_COLOR = 0xFF8800FF;      // Purple split glow
+    private static final int SCATTERED_COLOR = 0xFF88DDFF;        // Light blue scattered
+    private static final int FRESNEL_COLOR = 0xFFFFCC00;          // Golden Fresnel effect
+    private static final int ABSORPTION_COLOR = 0xFFFF4400;       // Orange absorption
 
-    // Optimized thickness and lifetime values
-    private static final float CORE_THICKNESS = 0.04f;
-    private static final float OUTER_THICKNESS = 0.2f;
-    private static final float SPLIT_THICKNESS = 0.12f;
-    private static final int BASE_LIFETIME = 80;          // 4 seconds
-    private static final int IMPACT_LIFETIME = 60;        // 3 seconds
-    private static final int SPARK_LIFETIME = 40;         // 2 seconds
+    // Enhanced visual properties
+    private static final float PRIMARY_CORE_THICKNESS = 0.04f;
+    private static final float PRIMARY_OUTER_THICKNESS = 0.3f;
+    private static final float SPLIT_CORE_THICKNESS = 0.025f;
+    private static final float SPLIT_OUTER_THICKNESS = 0.15f;
+    private static final float SCATTERED_THICKNESS = 0.02f;
 
-    // Performance limits
-    private static final int MAX_PARTICLES_PER_SEGMENT = 3;
-    private static final int MAX_SPARKS_PER_IMPACT = 8;
-    private static final int MAX_RENDER_DISTANCE_SQ = 10000; // 100 blocks squared
+    // Lifetime configurations
+    private static final int PRIMARY_LIFETIME = 80;
+    private static final int SPLIT_LIFETIME = 60;
+    private static final int SCATTERED_LIFETIME = 40;
+    private static final int PARTICLE_LIFETIME = 30;
+    private static final int FRESNEL_LIFETIME = 20;
+
+    // Particle effects
+    private static final int PHOTON_PARTICLE_DENSITY = 8;
+    private static final int ABSORPTION_PARTICLE_COUNT = 12;
 
     public static void handleOptimizedPulsarAttack(Vec3 startPos, Vec3 direction, int shooterId,
                                                    float baseDamage, int maxBounces, double maxRange,
                                                    List<PulsarCannonItem.OptimizedSegment> preCalculatedSegments) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null || mc.player == null) return;
+        if (mc.level == null) return;
 
         Level level = mc.level;
         Entity shooter = level.getEntity(shooterId);
-        Vec3 playerPos = mc.player.position();
 
-        // Group segments by generation and type for efficient rendering
-        Map<Integer, List<PulsarCannonItem.OptimizedSegment>> segmentsByGeneration = new HashMap<>();
-        List<PulsarCannonItem.OptimizedSegment> primarySegments = new ArrayList<>();
-        List<PulsarCannonItem.OptimizedSegment> splitSegments = new ArrayList<>();
-
-        for (PulsarCannonItem.OptimizedSegment segment : preCalculatedSegments) {
-            // Skip segments too far from player for performance
-            double distSq = Math.min(
-                    segment.start.distanceToSqr(playerPos),
-                    segment.end.distanceToSqr(playerPos)
-            );
-            if (distSq > MAX_RENDER_DISTANCE_SQ) continue;
-
-            segmentsByGeneration.computeIfAbsent(segment.generation, k -> new ArrayList<>()).add(segment);
-
-            if (segment.isSplit) {
-                splitSegments.add(segment);
-            } else {
-                primarySegments.add(segment);
-            }
-        }
-
-        // Render in order: primary beams, then split beams by generation
-        renderOptimizedBeamSegments(primarySegments, false, playerPos);
-
-        for (int generation = 1; generation <= 5; generation++) { // Limit generations rendered
-            List<PulsarCannonItem.OptimizedSegment> genSegments = segmentsByGeneration.get(generation);
-            if (genSegments != null && !genSegments.isEmpty()) {
-                renderOptimizedBeamSegments(genSegments, true, playerPos);
-            }
-        }
-
-        // Create optimized impact effects
-        createOptimizedImpactEffects(level, preCalculatedSegments, playerPos);
-
-        // Play optimized sound effects
-        playOptimizedPulsarSounds(level, preCalculatedSegments, playerPos);
+        // Render the advanced photon beam system
+        renderAdvancedPhotonBeam(preCalculatedSegments, level);
+        createAdvancedParticleEffects(level, preCalculatedSegments);
+        playAdvancedPhotonSounds(level, preCalculatedSegments);
     }
 
-    private static void renderOptimizedBeamSegments(List<PulsarCannonItem.OptimizedSegment> segments,
-                                                    boolean isSplit, Vec3 playerPos) {
-        if (segments.isEmpty()) return;
+    private static void renderAdvancedPhotonBeam(List<PulsarCannonItem.OptimizedSegment> segments, Level level) {
+        // Group segments by generation for proper layering
+        Map<Integer, List<PulsarCannonItem.OptimizedSegment>> segmentsByGeneration =
+                groupSegmentsByGeneration(segments);
+
+        // Render in order of generation for proper layering
+        for (int gen = 0; gen <= getMaxGeneration(segmentsByGeneration); gen++) {
+            List<PulsarCannonItem.OptimizedSegment> genSegments = segmentsByGeneration.get(gen);
+            if (genSegments == null) continue;
+
+            // Group by photon type for efficient rendering
+            Map<PulsarCannonItem.PhotonType, List<PulsarCannonItem.OptimizedSegment>> byType =
+                    groupSegmentsByType(genSegments);
+
+            // Render each type with specific properties
+            for (Map.Entry<PulsarCannonItem.PhotonType, List<PulsarCannonItem.OptimizedSegment>> entry : byType.entrySet()) {
+                renderPhotonType(entry.getKey(), entry.getValue(), gen);
+            }
+        }
+    }
+
+    private static void renderPhotonType(PulsarCannonItem.PhotonType type,
+                                         List<PulsarCannonItem.OptimizedSegment> segments, int generation) {
+        PhotonRenderProperties props = getPhotonRenderProperties(type, generation);
 
         for (PulsarCannonItem.OptimizedSegment segment : segments) {
-            float energyRatio = Mth.clamp(segment.energy / 25.0f, 0.1f, 1.0f);
+            float energyRatio = Mth.clamp(segment.energy / 30.0f, 0.1f, 1.0f);
+            float intensityMultiplier = (float) Math.max(0.3, segment.intensity);
 
-            // Distance-based LOD
-            double avgDistSq = (segment.start.distanceToSqr(playerPos) + segment.end.distanceToSqr(playerPos)) * 0.5;
-            boolean isClose = avgDistSq < 625; // 25 blocks squared
-            boolean isMedium = avgDistSq < 2500; // 50 blocks squared
+            // Dynamic beam properties based on energy and intensity
+            float coreThickness = props.coreThickness * energyRatio * intensityMultiplier;
+            float outerThickness = props.outerThickness * energyRatio * intensityMultiplier;
 
-            // Core beam - always render
-            int coreColor = isSplit ? PULSAR_COLOR_SPLIT : PULSAR_COLOR_CORE;
-            float coreThickness = (isSplit ? SPLIT_THICKNESS : CORE_THICKNESS) * energyRatio;
-
+            // Core beam with energy-dependent color
+            int coreColor = interpolateEnergyColor(props.coreColor, energyRatio, segment.bounceCount);
             VectorRenderer.drawLineWorld(
-                    segment.start, segment.end, coreColor, coreThickness, false, BASE_LIFETIME, null
+                    segment.start, segment.end,
+                    coreColor, coreThickness, false,
+                    props.lifetime, null
             );
 
-            // Outer glow - render based on distance
-            if (isMedium) {
-                int outerColor = isSplit ? PULSAR_COLOR_SPLIT : PULSAR_COLOR_PRIMARY;
-                float outerThickness = OUTER_THICKNESS * energyRatio * (isSplit ? 0.7f : 1.0f);
-                int glowColor = (outerColor & 0x00FFFFFF) | (((int)(120 * energyRatio)) << 24);
+            // Outer glow with transparency
+            int outerColor = interpolateEnergyColor(props.outerColor, energyRatio * 0.8f, segment.bounceCount);
+            outerColor = (outerColor & 0x00FFFFFF) | (((int)(180 * energyRatio * intensityMultiplier)) << 24);
 
-                VectorRenderer.drawLineWorld(
-                        segment.start, segment.end, glowColor, outerThickness, false, BASE_LIFETIME, null
-                );
+            VectorRenderer.drawLineWorld(
+                    segment.start, segment.end,
+                    outerColor, outerThickness, false,
+                    props.lifetime, null
+            );
+
+            // Add spectral dispersion effects for high-energy beams
+            if (energyRatio > 0.7f && type == PulsarCannonItem.PhotonType.PRIMARY) {
+                addSpectralDispersion(segment, energyRatio);
             }
 
-            // Energy particles - only for close segments
-            if (isClose && segment.bounceCount < 50) { // Limit particles for high bounce counts
-                addOptimizedEnergyParticles(segment, energyRatio, isSplit);
+            // Add interference patterns for split beams
+            if (segment.isSplit && generation > 0) {
+                addInterferencePattern(segment, generation);
             }
 
-            // Split effect - only at generation start
-            if (isSplit && segment.bounceCount == 0 && isClose) {
-                createOptimizedSplitEffect(segment.start, energyRatio);
-            }
+            // Photon particle trail
+            addPhotonParticleTrail(segment, props, energyRatio);
         }
     }
 
-    private static void addOptimizedEnergyParticles(PulsarCannonItem.OptimizedSegment segment,
-                                                    float energy, boolean isSplit) {
+    private static PhotonRenderProperties getPhotonRenderProperties(PulsarCannonItem.PhotonType type, int generation) {
+        float generationFactor = Math.max(0.5f, 1.0f - generation * 0.1f);
+
+        return switch (type) {
+            case PRIMARY -> new PhotonRenderProperties(
+                    PRIMARY_CORE_COLOR, PRIMARY_OUTER_COLOR,
+                    PRIMARY_CORE_THICKNESS, PRIMARY_OUTER_THICKNESS,
+                    PRIMARY_LIFETIME
+            );
+            case SPLIT -> new PhotonRenderProperties(
+                    SPLIT_CORE_COLOR, SPLIT_OUTER_COLOR,
+                    SPLIT_CORE_THICKNESS * generationFactor, SPLIT_OUTER_THICKNESS * generationFactor,
+                    (int)(SPLIT_LIFETIME * generationFactor)
+            );
+            case SCATTERED -> new PhotonRenderProperties(
+                    SCATTERED_COLOR, SCATTERED_COLOR,
+                    SCATTERED_THICKNESS * generationFactor, SCATTERED_THICKNESS * 2 * generationFactor,
+                    (int)(SCATTERED_LIFETIME * generationFactor)
+            );
+        };
+    }
+
+    private static void addSpectralDispersion(PulsarCannonItem.OptimizedSegment segment, float energyRatio) {
+        Vec3 direction = segment.end.subtract(segment.start).normalize();
+        Vec3 perpendicular = getPerpendicular(direction).scale(0.05 * energyRatio);
+
+        // Create rainbow dispersion effect
+        int[] spectrumColors = {0xFFFF0000, 0xFFFF8800, 0xFFFFFF00, 0xFF00FF00, 0xFF0088FF, 0xFF0000FF, 0xFF8800FF};
+
+        for (int i = 0; i < spectrumColors.length; i++) {
+            double offset = (i - 3) * 0.02 * energyRatio;
+            Vec3 dispersedStart = segment.start.add(perpendicular.scale(offset));
+            Vec3 dispersedEnd = segment.end.add(perpendicular.scale(offset));
+
+            int color = (spectrumColors[i] & 0x00FFFFFF) | (((int)(120 * energyRatio)) << 24);
+
+            VectorRenderer.drawLineWorld(
+                    dispersedStart, dispersedEnd,
+                    color, 0.01f, false,
+                    PRIMARY_LIFETIME / 2, null
+            );
+        }
+    }
+
+    private static void addInterferencePattern(PulsarCannonItem.OptimizedSegment segment, int generation) {
+        Vec3 direction = segment.end.subtract(segment.start).normalize();
+        double length = segment.start.distanceTo(segment.end);
+
+        // Create wave interference pattern
+        int waveCount = Math.min(8, (int)(length * 2));
+        for (int i = 0; i < waveCount; i++) {
+            double t = (double)i / waveCount;
+            Vec3 wavePos = segment.start.add(direction.scale(length * t));
+
+            float amplitude = 0.1f / (generation + 1);
+            int waveColor = interpolateColor(SPLIT_CORE_COLOR, FRESNEL_COLOR, Math.sin(t * Math.PI * 4));
+            waveColor = (waveColor & 0x00FFFFFF) | (((int)(100 / (generation + 1))) << 24);
+
+            VectorRenderer.drawSphereWorld(
+                    wavePos, amplitude,
+                    waveColor, 6, 6, false,
+                    FRESNEL_LIFETIME, null
+            );
+        }
+    }
+
+    private static void addPhotonParticleTrail(PulsarCannonItem.OptimizedSegment segment,
+                                               PhotonRenderProperties props, float energyRatio) {
         Vec3 direction = segment.end.subtract(segment.start);
         double length = direction.length();
-
-        if (length < 1.0) return; // Skip tiny segments
-
         direction = direction.normalize();
-        int particleCount = Math.min(MAX_PARTICLES_PER_SEGMENT, (int)(length * energy));
+
+        int particleCount = (int)(length * PHOTON_PARTICLE_DENSITY * energyRatio);
+        particleCount = Math.min(particleCount, 50);
 
         for (int i = 0; i < particleCount; i++) {
             double t = (double)i / Math.max(1, particleCount - 1);
             Vec3 particlePos = segment.start.add(direction.scale(length * t));
 
-            // Smaller quantum fluctuation for performance
-            double fluctuation = 0.08 * energy;
+            // Add quantum uncertainty to position
+            double uncertainty = 0.05 * energyRatio;
             particlePos = particlePos.add(
-                    (Math.random() - 0.5) * fluctuation,
-                    (Math.random() - 0.5) * fluctuation,
-                    (Math.random() - 0.5) * fluctuation
+                    (Math.random() - 0.5) * uncertainty,
+                    (Math.random() - 0.5) * uncertainty,
+                    (Math.random() - 0.5) * uncertainty
             );
 
-            int particleColor = isSplit ? PULSAR_COLOR_SPLIT : QUANTUM_SPARK_COLOR;
-            particleColor = (particleColor & 0x00FFFFFF) | (((int)(180 * energy)) << 24);
+            float particleSize = 0.015f * energyRatio * (0.8f + (float)Math.random() * 0.4f);
+            int particleColor = interpolateColor(props.coreColor, props.outerColor, Math.random());
+            particleColor = (particleColor & 0x00FFFFFF) | (((int)(220 * energyRatio)) << 24);
 
             VectorRenderer.drawSphereWorld(
-                    particlePos, 0.025f * energy, particleColor, 4, 4, false, SPARK_LIFETIME, null
+                    particlePos, particleSize,
+                    particleColor, 4, 4, false,
+                    PARTICLE_LIFETIME, null
             );
         }
     }
 
-    private static void createOptimizedSplitEffect(Vec3 splitPos, float energy) {
-        // Central split orb
+    private static void createAdvancedParticleEffects(Level level, List<PulsarCannonItem.OptimizedSegment> segments) {
+        Map<Vec3, Float> impactPoints = findImpactPoints(segments);
+        Map<Vec3, Integer> reflectionPoints = findReflectionPoints(segments);
+
+        // Create impact effects at end points
+        for (Map.Entry<Vec3, Float> impact : impactPoints.entrySet()) {
+            createPhotonImpactEffect(level, impact.getKey(), impact.getValue());
+        }
+
+        // Create Fresnel effects at reflection points
+        for (Map.Entry<Vec3, Integer> reflection : reflectionPoints.entrySet()) {
+            createFresnelReflectionEffect(level, reflection.getKey(), reflection.getValue());
+        }
+
+        // Create quantum effects for high-energy segments
+        createQuantumEffects(level, segments);
+    }
+
+    private static void createPhotonImpactEffect(Level level, Vec3 impactPos, float energy) {
+        float intensity = Math.min(1.0f, energy / 30.0f);
+
+        // Central impact sphere
         VectorRenderer.drawSphereWorld(
-                splitPos, 0.15f * energy, PULSAR_COLOR_SPLIT, 8, 8, false, IMPACT_LIFETIME, null
+                impactPos, 0.4f * intensity,
+                ABSORPTION_COLOR, 12, 12, false,
+                PRIMARY_LIFETIME, null
         );
 
-        // Simple split rings
-        for (int ring = 0; ring < 2; ring++) {
-            float ringRadius = 0.2f + ring * 0.1f;
-            int ringAlpha = (int)(100 * energy) - ring * 30;
-            int ringColor = (PULSAR_COLOR_SPLIT & 0x00FFFFFF) | (ringAlpha << 24);
-
-            createSimpleRing(splitPos, ringRadius, ringColor, IMPACT_LIFETIME - ring * 15);
-        }
-    }
-
-    private static void createOptimizedImpactEffects(Level level,
-                                                     List<PulsarCannonItem.OptimizedSegment> segments,
-                                                     Vec3 playerPos) {
-        if (segments.isEmpty()) return;
-
-        // Find end points and create impacts
-        Map<Vec3, Float> impactPoints = new HashMap<>();
-
-        for (PulsarCannonItem.OptimizedSegment segment : segments) {
-            // Only create impacts for segments that hit blocks or are at the end of a beam
-            if (segment.hitBlock || isEndSegment(segment, segments)) {
-                Vec3 impactPos = segment.end;
-
-                // Skip distant impacts
-                if (impactPos.distanceToSqr(playerPos) > MAX_RENDER_DISTANCE_SQ) continue;
-
-                Float existingEnergy = impactPoints.get(impactPos);
-                if (existingEnergy == null || segment.energy > existingEnergy) {
-                    impactPoints.put(impactPos, segment.energy);
-                }
-            }
-        }
-
-        // Create impact effects with limited count
-        int impactCount = 0;
-        for (Map.Entry<Vec3, Float> entry : impactPoints.entrySet()) {
-            if (impactCount++ > 20) break; // Limit total impacts
-
-            Vec3 pos = entry.getKey();
-            float energy = entry.getValue();
-            createOptimizedImpact(pos, energy, pos.distanceToSqr(playerPos) < 625);
-        }
-
-        // Add visual entity hits (limited count)
-        addOptimizedEntityHitEffects(level, segments, playerPos);
-    }
-
-    private static boolean isEndSegment(PulsarCannonItem.OptimizedSegment segment,
-                                        List<PulsarCannonItem.OptimizedSegment> allSegments) {
-        Vec3 segmentEnd = segment.end;
-
-        // Check if any other segment starts where this one ends
-        for (PulsarCannonItem.OptimizedSegment other : allSegments) {
-            if (other != segment && other.start.distanceToSqr(segmentEnd) < 0.01) {
-                return false; // This segment continues
-            }
-        }
-        return true; // This is an end segment
-    }
-
-    private static void createOptimizedImpact(Vec3 impactPos, float energy, boolean isClose) {
-        float intensity = Mth.clamp(energy / 25.0f, 0.2f, 1.0f);
-
-        // Core impact
+        // Expanding energy wave
         VectorRenderer.drawSphereWorld(
-                impactPos, 0.2f * intensity, IMPACT_COLOR_CORE,
-                isClose ? 10 : 6, isClose ? 10 : 6, false, IMPACT_LIFETIME, null
+                impactPos, 0.8f * intensity,
+                (ABSORPTION_COLOR & 0x00FFFFFF) | 0x60000000,
+                16, 16, false,
+                PRIMARY_LIFETIME / 2, null
         );
 
-        if (isClose) {
-            // Outer shockwave for close impacts only
-            VectorRenderer.drawSphereWorld(
-                    impactPos, 0.4f * intensity,
-                    (IMPACT_COLOR_OUTER & 0x00FFFFFF) | 0x60000000,
-                    8, 8, false, IMPACT_LIFETIME, null
+        // Energy burst particles
+        int burstCount = (int)(ABSORPTION_PARTICLE_COUNT * intensity);
+        for (int i = 0; i < burstCount; i++) {
+            double theta = Math.random() * Math.PI * 2;
+            double phi = Math.random() * Math.PI;
+            double distance = 1.0 + Math.random() * 2.0 * intensity;
+
+            Vec3 particleDir = new Vec3(
+                    Math.sin(phi) * Math.cos(theta),
+                    Math.cos(phi),
+                    Math.sin(phi) * Math.sin(theta)
             );
 
-            // Energy sparks
-            int sparkCount = Math.min(MAX_SPARKS_PER_IMPACT, (int)(8 * intensity));
-            for (int i = 0; i < sparkCount; i++) {
-                double angle = (i * Math.PI * 2) / sparkCount;
-                Vec3 sparkEnd = impactPos.add(
-                        Math.cos(angle) * 0.8 * intensity,
-                        (Math.random() - 0.5) * 0.4 * intensity,
-                        Math.sin(angle) * 0.8 * intensity
-                );
+            Vec3 particleEnd = impactPos.add(particleDir.scale(distance));
+            int burstColor = interpolateColor(ABSORPTION_COLOR, PRIMARY_CORE_COLOR, Math.random());
 
-                VectorRenderer.drawLineWorld(
-                        impactPos, sparkEnd, QUANTUM_SPARK_COLOR, 0.03f,
-                        false, SPARK_LIFETIME, null
-                );
-            }
+            VectorRenderer.drawLineWorld(
+                    impactPos, particleEnd,
+                    burstColor, 0.03f + (float)Math.random() * 0.05f, false,
+                    PARTICLE_LIFETIME, null
+            );
+        }
+
+        // Add Minecraft particles
+        addMinecraftParticles(level, impactPos, intensity);
+    }
+
+    private static void createFresnelReflectionEffect(Level level, Vec3 reflectionPos, int bounceCount) {
+        float intensity = Math.max(0.3f, 1.0f - bounceCount * 0.05f);
+
+        // Fresnel reflection sphere
+        VectorRenderer.drawSphereWorld(
+                reflectionPos, 0.2f * intensity,
+                (FRESNEL_COLOR & 0x00FFFFFF) | (((int)(180 * intensity)) << 24),
+                8, 8, false,
+                FRESNEL_LIFETIME, null
+        );
+
+        // Reflection rays
+        int rayCount = Math.max(3, 6 - bounceCount / 5);
+        for (int i = 0; i < rayCount; i++) {
+            double angle = (2.0 * Math.PI * i) / rayCount;
+            Vec3 rayDir = new Vec3(Math.cos(angle), 0.2, Math.sin(angle)).normalize();
+            Vec3 rayEnd = reflectionPos.add(rayDir.scale(0.6 * intensity));
+
+            VectorRenderer.drawLineWorld(
+                    reflectionPos, rayEnd,
+                    FRESNEL_COLOR, 0.02f, false,
+                    FRESNEL_LIFETIME, null
+            );
         }
     }
 
-    private static void addOptimizedEntityHitEffects(Level level,
-                                                     List<PulsarCannonItem.OptimizedSegment> segments,
-                                                     Vec3 playerPos) {
-        int hitEffectCount = 0;
-
+    private static void createQuantumEffects(Level level, List<PulsarCannonItem.OptimizedSegment> segments) {
         for (PulsarCannonItem.OptimizedSegment segment : segments) {
-            if (hitEffectCount > 15) break; // Limit entity hit effects
+            if (segment.energy > 20.0f && segment.bounceCount > 10) {
+                Vec3 midpoint = segment.start.add(segment.end).scale(0.5);
 
-            AABB boundingBox = new AABB(segment.start, segment.end).inflate(0.5);
+                // Quantum uncertainty visualization
+                for (int i = 0; i < 4; i++) {
+                    Vec3 uncertaintyPos = midpoint.add(
+                            (Math.random() - 0.5) * 0.3,
+                            (Math.random() - 0.5) * 0.3,
+                            (Math.random() - 0.5) * 0.3
+                    );
 
-            // Skip distant segments
-            Vec3 segmentCenter = segment.start.add(segment.end).scale(0.5);
-            if (segmentCenter.distanceToSqr(playerPos) > MAX_RENDER_DISTANCE_SQ) continue;
+                    int quantumColor = interpolateColor(PRIMARY_CORE_COLOR, SPLIT_CORE_COLOR, Math.random());
+                    quantumColor = (quantumColor & 0x00FFFFFF) | 0x80000000;
 
-            List<Entity> entities = level.getEntitiesOfClass(Entity.class, boundingBox);
-
-            for (Entity entity : entities) {
-                if (hitEffectCount > 15) break;
-
-                if (simpleEntityIntersection(segment, entity)) {
-                    Vec3 hitPos = entity.position().add(0, entity.getBbHeight() * 0.5, 0);
-                    createSimpleEntityHitEffect(hitPos, segment.energy, segment.isSplit);
-                    hitEffectCount++;
+                    VectorRenderer.drawSphereWorld(
+                            uncertaintyPos, 0.05f,
+                            quantumColor, 6, 6, false,
+                            PARTICLE_LIFETIME / 2, null
+                    );
                 }
             }
         }
     }
 
-    private static boolean simpleEntityIntersection(PulsarCannonItem.OptimizedSegment segment, Entity entity) {
-        AABB entityBounds = entity.getBoundingBox();
-        Vec3 segmentCenter = segment.start.add(segment.end).scale(0.5);
-        Vec3 entityCenter = entityBounds.getCenter();
+    private static void addMinecraftParticles(Level level, Vec3 pos, float intensity) {
+        // Electric spark particles
+        for (int i = 0; i < intensity * 8; i++) {
+            level.addParticle(ParticleTypes.ELECTRIC_SPARK,
+                    pos.x + (Math.random() - 0.5) * 0.5,
+                    pos.y + (Math.random() - 0.5) * 0.5,
+                    pos.z + (Math.random() - 0.5) * 0.5,
+                    (Math.random() - 0.5) * 0.2,
+                    (Math.random() - 0.5) * 0.2,
+                    (Math.random() - 0.5) * 0.2);
+        }
 
-        double segmentHalfLength = segment.start.distanceTo(segment.end) * 0.5;
-        double entityRadius = Math.max(entityBounds.getXsize(), entityBounds.getZsize()) * 0.5;
-
-        return segmentCenter.distanceTo(entityCenter) <= (segmentHalfLength + entityRadius + 0.5);
-    }
-
-    private static void createSimpleEntityHitEffect(Vec3 hitPos, float energy, boolean isSplit) {
-        float intensity = energy / 25.0f;
-        int hitColor = isSplit ? PULSAR_COLOR_SPLIT : 0xFFFF0033;
-
-        VectorRenderer.drawSphereWorld(
-                hitPos, 0.15f * intensity, hitColor, 6, 6, false, IMPACT_LIFETIME / 2, null
-        );
-    }
-
-    private static void createSimpleRing(Vec3 center, float radius, int color, int lifetime) {
-        int segments = Math.max(8, (int)(radius * 16)); // Fewer segments for performance
-
-        for (int i = 0; i < segments; i++) {
-            double angle1 = (i * Math.PI * 2) / segments;
-            double angle2 = ((i + 1) * Math.PI * 2) / segments;
-
-            Vec3 point1 = center.add(Math.cos(angle1) * radius, 0, Math.sin(angle1) * radius);
-            Vec3 point2 = center.add(Math.cos(angle2) * radius, 0, Math.sin(angle2) * radius);
-
-            VectorRenderer.drawLineWorld(point1, point2, color, 0.03f, false, lifetime, null);
+        // Soul fire flame particles for high energy
+        if (intensity > 0.7f) {
+            for (int i = 0; i < intensity * 4; i++) {
+                level.addParticle(ParticleTypes.SOUL_FIRE_FLAME,
+                        pos.x + (Math.random() - 0.5) * 0.3,
+                        pos.y + (Math.random() - 0.5) * 0.3,
+                        pos.z + (Math.random() - 0.5) * 0.3,
+                        0, 0.02, 0);
+            }
         }
     }
 
-    private static void playOptimizedPulsarSounds(Level level,
-                                                  List<PulsarCannonItem.OptimizedSegment> segments,
-                                                  Vec3 playerPos) {
+    private static void playAdvancedPhotonSounds(Level level, List<PulsarCannonItem.OptimizedSegment> segments) {
         if (segments.isEmpty()) return;
 
-        // Play only the most important sounds to avoid audio spam
+        // Count different types of interactions
+        int totalBounces = segments.stream().mapToInt(s -> s.bounceCount).max().orElse(0);
+        int splitCount = (int) segments.stream().filter(s -> s.isSplit).count();
 
-        // Find the furthest impact for main sound
-        double maxDistanceFromStart = 0;
-        Vec3 mainImpactPos = null;
+        // Main beam sound at start
+        Vec3 startPos = segments.get(0).start;
+        level.playLocalSound(startPos.x, startPos.y, startPos.z,
+                SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS,
+                2.0f, 0.6f + totalBounces * 0.01f, false);
+
+        // Reflection chimes
+        if (totalBounces > 5) {
+            level.playLocalSound(startPos.x, startPos.y, startPos.z,
+                    SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.PLAYERS,
+                    1.5f, 1.2f + totalBounces * 0.002f, false);
+        }
+
+        // Splitting sound for high split counts
+        if (splitCount > 3) {
+            level.playLocalSound(startPos.x, startPos.y, startPos.z,
+                    SoundEvents.RESPAWN_ANCHOR_CHARGE, SoundSource.PLAYERS,
+                    1.0f, 1.8f, false);
+        }
+
+        // Final impact sound
+        Vec3 finalPos = segments.get(segments.size() - 1).end;
+        level.playLocalSound(finalPos.x, finalPos.y, finalPos.z,
+                SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS,
+                1.5f + splitCount * 0.1f, 1.5f + totalBounces * 0.005f, false);
+    }
+
+    // Utility methods
+    private static Map<Integer, List<PulsarCannonItem.OptimizedSegment>> groupSegmentsByGeneration(
+            List<PulsarCannonItem.OptimizedSegment> segments) {
+        Map<Integer, List<PulsarCannonItem.OptimizedSegment>> grouped = new HashMap<>();
 
         for (PulsarCannonItem.OptimizedSegment segment : segments) {
-            double distFromStart = segment.start.distanceTo(segments.get(0).start);
-            if (distFromStart > maxDistanceFromStart) {
-                maxDistanceFromStart = distFromStart;
-                mainImpactPos = segment.end;
+            grouped.computeIfAbsent(segment.generation, k -> new ArrayList<>()).add(segment);
+        }
+
+        return grouped;
+    }
+
+    private static Map<PulsarCannonItem.PhotonType, List<PulsarCannonItem.OptimizedSegment>> groupSegmentsByType(
+            List<PulsarCannonItem.OptimizedSegment> segments) {
+        Map<PulsarCannonItem.PhotonType, List<PulsarCannonItem.OptimizedSegment>> grouped = new HashMap<>();
+
+        for (PulsarCannonItem.OptimizedSegment segment : segments) {
+            PulsarCannonItem.PhotonType type = segment.type != null ? segment.type : PulsarCannonItem.PhotonType.PRIMARY;
+            grouped.computeIfAbsent(type, k -> new ArrayList<>()).add(segment);
+        }
+
+        return grouped;
+    }
+
+    private static int getMaxGeneration(Map<Integer, List<PulsarCannonItem.OptimizedSegment>> map) {
+        return map.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
+    }
+
+    private static Map<Vec3, Float> findImpactPoints(List<PulsarCannonItem.OptimizedSegment> segments) {
+        Map<Vec3, Float> impacts = new HashMap<>();
+
+        for (PulsarCannonItem.OptimizedSegment segment : segments) {
+            if (segment.hitBlock) {
+                Vec3 roundedPos = new Vec3(
+                        Math.round(segment.end.x * 100.0) / 100.0,
+                        Math.round(segment.end.y * 100.0) / 100.0,
+                        Math.round(segment.end.z * 100.0) / 100.0
+                );
+                impacts.merge(roundedPos, segment.energy, Float::sum);
             }
         }
 
-        // Main impact sound
-        if (mainImpactPos != null && mainImpactPos.distanceToSqr(playerPos) < MAX_RENDER_DISTANCE_SQ) {
-            level.playLocalSound(mainImpactPos.x, mainImpactPos.y, mainImpactPos.z,
-                    SoundEvents.WITHER_DEATH, SoundSource.PLAYERS, 1.5f, 0.8f, false);
-        }
+        return impacts;
+    }
 
-        // Limited reflection sounds (more for epic bouncing)
-        int reflectionSoundCount = 0;
+    private static Map<Vec3, Integer> findReflectionPoints(List<PulsarCannonItem.OptimizedSegment> segments) {
+        Map<Vec3, Integer> reflections = new HashMap<>();
+
         for (PulsarCannonItem.OptimizedSegment segment : segments) {
-            if (reflectionSoundCount >= 8) break; // More reflection sounds
-            if (segment.bounceCount > 0 && segment.bounceCount <= 20) { // More early bounces get sounds
-                if (segment.start.distanceToSqr(playerPos) < 2500) { // 50 blocks
-                    level.playLocalSound(segment.start.x, segment.start.y, segment.start.z,
-                            SoundEvents.AMETHYST_CLUSTER_BREAK, SoundSource.PLAYERS,
-                            0.3f, 1.2f + (reflectionSoundCount * 0.1f), false);
-                    reflectionSoundCount++;
-                }
+            if (segment.bounceCount > 0 && segment.hitBlock) {
+                Vec3 roundedPos = new Vec3(
+                        Math.round(segment.end.x * 100.0) / 100.0,
+                        Math.round(segment.end.y * 100.0) / 100.0,
+                        Math.round(segment.end.z * 100.0) / 100.0
+                );
+                reflections.merge(roundedPos, 1, Integer::sum);
             }
         }
 
-        // Multiple split sounds for epic splitting
-        int splitSoundCount = 0;
-        for (PulsarCannonItem.OptimizedSegment segment : segments) {
-            if (splitSoundCount >= 4 && segment.isSplit && segment.bounceCount == 0) break; // More split sounds
-            if (segment.isSplit && segment.bounceCount == 0) {
-                if (segment.start.distanceToSqr(playerPos) < 3600) { // 60 blocks
-                    level.playLocalSound(segment.start.x, segment.start.y, segment.start.z,
-                            SoundEvents.CHORUS_FRUIT_TELEPORT, SoundSource.PLAYERS,
-                            0.6f, 1.8f + (splitSoundCount * 0.2f), false);
-                    splitSoundCount++;
-                }
-            }
+        return reflections;
+    }
+
+    private static Vec3 getPerpendicular(Vec3 vector) {
+        Vec3 candidate = new Vec3(0, 1, 0);
+        if (Math.abs(vector.dot(candidate)) > 0.9) {
+            candidate = new Vec3(1, 0, 0);
+        }
+        return vector.cross(candidate).normalize();
+    }
+
+    private static int interpolateColor(int color1, int color2, double t) {
+        t = Mth.clamp(t, 0.0, 1.0);
+
+        int a1 = (color1 >> 24) & 0xFF, r1 = (color1 >> 16) & 0xFF,
+                g1 = (color1 >> 8) & 0xFF, b1 = color1 & 0xFF;
+        int a2 = (color2 >> 24) & 0xFF, r2 = (color2 >> 16) & 0xFF,
+                g2 = (color2 >> 8) & 0xFF, b2 = color2 & 0xFF;
+
+        int a = (int)(a1 + t * (a2 - a1));
+        int r = (int)(r1 + t * (r2 - r1));
+        int g = (int)(g1 + t * (g2 - g1));
+        int b = (int)(b1 + t * (b2 - b1));
+
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    private static int interpolateEnergyColor(int baseColor, float energyRatio, int bounceCount) {
+        float heatFactor = Math.max(0.3f, energyRatio);
+        float bounceFactor = Math.max(0.5f, 1.0f - bounceCount * 0.02f);
+
+        int r = (baseColor >> 16) & 0xFF;
+        int g = (baseColor >> 8) & 0xFF;
+        int b = baseColor & 0xFF;
+
+        // Shift toward red as energy decreases
+        if (energyRatio < 0.7f) {
+            r = Math.min(255, (int)(r + (1.0f - energyRatio) * 100));
+            b = Math.max(50, (int)(b * energyRatio));
+        }
+
+        // Dim with bounces
+        r = (int)(r * bounceFactor);
+        g = (int)(g * bounceFactor);
+        b = (int)(b * bounceFactor);
+
+        return (baseColor & 0xFF000000) | (r << 16) | (g << 8) | b;
+    }
+
+    // Data class
+    private static class PhotonRenderProperties {
+        public final int coreColor;
+        public final int outerColor;
+        public final float coreThickness;
+        public final float outerThickness;
+        public final int lifetime;
+
+        public PhotonRenderProperties(int coreColor, int outerColor, float coreThickness,
+                                      float outerThickness, int lifetime) {
+            this.coreColor = coreColor;
+            this.outerColor = outerColor;
+            this.coreThickness = coreThickness;
+            this.outerThickness = outerThickness;
+            this.lifetime = lifetime;
         }
     }
 }
