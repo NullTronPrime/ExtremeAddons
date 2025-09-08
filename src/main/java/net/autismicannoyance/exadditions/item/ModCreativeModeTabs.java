@@ -50,6 +50,7 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModItems.SAPPHIRE_SHOVEL.get());
                         pOutput.accept(ModItems.EYE_STAFF.get());
                         pOutput.accept(ModItems.LASER_RIFLE.get());
+                        pOutput.accept(ModItems.ECHO_RIFLE.get());
 
                     })
                     .build());

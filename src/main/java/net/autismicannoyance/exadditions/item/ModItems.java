@@ -105,12 +105,16 @@ public class ModItems {
     public static final RegistryObject<Item> BLACK_HOLE_SUMMONER = ITEMS.register("black_hole_summoner",
             () -> new BlackHoleGeneratorItem(new Item.Properties().stacksTo(1)));
 
-    // New laser rifle item
     public static final RegistryObject<Item> LASER_RIFLE = ITEMS.register("laser_rifle",
             () -> new LaserRifleItem(new Item.Properties()
                     .stacksTo(1)
                     .durability(200)
                     .fireResistant()
+            ));
+    public static final RegistryObject<Item> ECHO_RIFLE = ITEMS.register("echo_rifle",
+            () -> new EchoRifleItem(new Item.Properties()
+                    .stacksTo(1)
+                    .durability(600)
             ));
 
     public static void register(IEventBus eventBus){
