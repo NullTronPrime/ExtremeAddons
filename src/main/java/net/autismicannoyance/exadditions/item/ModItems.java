@@ -121,6 +121,12 @@ public class ModItems {
                     .stacksTo(1)
                     .durability(300)
             ));
+    public static final RegistryObject<Item> AI_HIJACKER = ITEMS.register("ai_hijacker",
+            () -> new AIHijackerItem(new Item.Properties()
+                    .stacksTo(1)
+                    .durability(25)  // Limited uses - each hijack costs durability
+                    .rarity(Rarity.RARE)
+            ));
 
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);
