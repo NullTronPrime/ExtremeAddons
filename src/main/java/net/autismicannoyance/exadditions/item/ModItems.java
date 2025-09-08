@@ -116,6 +116,11 @@ public class ModItems {
                     .stacksTo(1)
                     .durability(600)
             ));
+    public static final RegistryObject<Item> PULSAR_CANNON = ITEMS.register("pulsar_cannon",
+            () -> new PulsarCannonItem(new Item.Properties()
+                    .stacksTo(1)
+                    .durability(300)
+            ));
 
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);

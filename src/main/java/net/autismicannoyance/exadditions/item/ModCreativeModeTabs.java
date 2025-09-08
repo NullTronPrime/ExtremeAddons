@@ -51,6 +51,7 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModItems.EYE_STAFF.get());
                         pOutput.accept(ModItems.LASER_RIFLE.get());
                         pOutput.accept(ModItems.ECHO_RIFLE.get());
+                        pOutput.accept(ModItems.PULSAR_CANNON.get());
 
                     })
                     .build());

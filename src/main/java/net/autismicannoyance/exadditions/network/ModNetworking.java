@@ -49,6 +49,10 @@ public final class ModNetworking {
         CHANNEL.registerMessage(id(), LaserAttackPacket.class,
                 LaserAttackPacket::encode, LaserAttackPacket::decode, LaserAttackPacket::handle);
 
+        // Pulsar attack packet - send from server to clients for ultimate pulsar cannon effects
+        CHANNEL.registerMessage(id(), PulsarAttackPacket.class,
+                PulsarAttackPacket::encode, PulsarAttackPacket::decode, PulsarAttackPacket::handle);
+
         // Echo beam packet - send from server to clients for echo rifle beam effects
         CHANNEL.registerMessage(id(), EchoBeamPacket.class,
                 EchoBeamPacket::encode, EchoBeamPacket::decode, EchoBeamPacket::handle);
