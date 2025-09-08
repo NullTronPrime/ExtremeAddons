@@ -56,5 +56,8 @@ public final class ModNetworking {
         // Echo beam packet - send from server to clients for echo rifle beam effects
         CHANNEL.registerMessage(id(), EchoBeamPacket.class,
                 EchoBeamPacket::encode, EchoBeamPacket::decode, EchoBeamPacket::handle);
+        //metorite packet
+        CHANNEL.registerMessage(id(), MeteoriteEffectPacket.class,
+                MeteoriteEffectPacket::encode, MeteoriteEffectPacket::decode, MeteoriteEffectPacket::handle);
     }
 }
