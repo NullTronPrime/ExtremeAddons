@@ -28,19 +28,20 @@ import net.minecraftforge.network.PacketDistributor;
 import java.util.*;
 
 public class PulsarCannonItem extends Item {
-    // Enhanced aggressive light physics properties with unlimited bouncing
+    // Enhanced aggressive light physics properties with infinite bouncing and piercing
     private static final int COOLDOWN_TICKS = 80;
     private static final int ENERGY_COST = 12;
     private static final float BASE_DAMAGE = 30.0f;
-    private static final int MAX_BOUNCES = 10000; // Massive bounce limit like laser rifle style
+    private static final int MAX_BOUNCES = Integer.MAX_VALUE; // Infinite bounces
     private static final double MAX_RANGE = 15000.0; // Much longer range
     private static final double ACCURACY = 0.998;
     private static final double DAMAGE_RETENTION = 0.995; // Better retention for more bouncing
     private static final double SPLIT_DAMAGE_RETENTION = 0.992; // Better retention for splits
     private static final double MIN_REFLECTION_ENERGY = 0.005; // Much lower minimum for extreme bouncing
-    private static final double BEAM_SPLIT_CHANCE = 0.85; // Higher split chance
+    private static final double BEAM_SPLIT_CHANCE = 0.30; // 30% split chance as requested
     private static final double PHOTON_SPLIT_CHANCE = 0.45; // Higher photon splitting
-    private static final int BOUNCE_DELAY_TICKS = 1; // 1 tick delay after bouncing
+    private static final int BOUNCE_DELAY_TICKS = 1; // 1 tick delay after bouncing as requested
+    private static final int MAX_SPLIT_GENERATIONS = 2; // Splits can only split twice more
 
     // Performance optimizations for extreme bouncing
     private static final int MAX_CALCULATION_TIME_MS = 150; // More time for extreme calculations
@@ -100,8 +101,8 @@ public class PulsarCannonItem extends Item {
 
         pendingCalculations.put(calculationId, calculation);
 
-        // Start the first segment immediately
-        processDelayedCalculation(calculationId);
+        // Start the first segment with 1 tick delay as requested
+        level.getServer().execute(() -> processDelayedCalculation(calculationId));
     }
 
     public static void processDelayedCalculation(String calculationId) {
@@ -126,14 +127,13 @@ public class PulsarCannonItem extends Item {
             if (!beamSegments.isEmpty()) {
                 OptimizedSegment lastSegment = beamSegments.get(beamSegments.size() - 1);
 
-                // If the last segment hit a block and we have energy, the beam will continue
-                // This is already handled in calculatePhotonPath, but we need to track if there are more segments coming
+                // If the last segment has remaining energy, there will be more bouncing
                 if (lastSegment.energy > MIN_REFLECTION_ENERGY * 2) {
                     hasMoreWork = true; // There might be more bouncing
                 }
 
-                // Create splits as offshoots (not replacing the main beam)
-                if (beam.energy > MIN_REFLECTION_ENERGY * 1.5 && lastSegment.hitBlock) {
+                // Create splits as offshoots if split generations haven't been exhausted
+                if (beam.energy > MIN_REFLECTION_ENERGY * 1.5 && lastSegment.hitBlock && beam.splitGenerationsRemaining > 0) {
                     List<PhotonBeam> splitBeams = calculateEnhancedPhotonSplitting(beam, lastSegment, calculation.generation);
                     newBeams.addAll(splitBeams); // These are offshoots
                 }
@@ -146,24 +146,32 @@ public class PulsarCannonItem extends Item {
             }
         }
 
-        // Apply damage for current segments
+        // Apply damage for current segments (infinite piercing)
         applyEnhancedPhotonDamage(calculation.level, calculation.allSegments, calculation.shooter);
 
-        if (hasMoreWork && calculation.generation < MAX_GENERATIONS && newBeams.size() > 0) {
-
+        if (hasMoreWork && calculation.generation < MAX_GENERATIONS && (newBeams.size() > 0 || !calculation.activeBeams.isEmpty())) {
             // Continue with new beams (offshoots only, main beams continue automatically via calculatePhotonPath)
             calculation.activeBeams.clear();
             calculation.activeBeams.addAll(newBeams); // Only the new split/scattered beams
             calculation.generation++;
 
-            // Schedule with 1 tick delay
-            calculation.level.getServer().execute(() -> {
-                calculation.level.getServer().execute(() -> processDelayedCalculation(calculationId));
-            });
+            // Schedule with BOUNCE_DELAY_TICKS delay as requested
+            scheduleWithDelay(calculation.level, () -> processDelayedCalculation(calculationId), BOUNCE_DELAY_TICKS);
         } else {
             // Calculation complete, send final result
             finishDelayedCalculation(calculation);
             pendingCalculations.remove(calculationId);
+        }
+    }
+
+    private static void scheduleWithDelay(ServerLevel level, Runnable task, int delayTicks) {
+        if (delayTicks <= 0) {
+            level.getServer().execute(task);
+        } else {
+            // Schedule with the requested delay
+            for (int i = 0; i < delayTicks; i++) {
+                level.getServer().execute(() -> level.getServer().execute(task));
+            }
         }
     }
 
@@ -196,9 +204,8 @@ public class PulsarCannonItem extends Item {
 
         if (beam.intensity < 0.2) baseStepSize *= 1.2;
 
-        // Continue bouncing like the laser rifle - don't break on hit
-        while (bounces <= MAX_BOUNCES && remainingRange > 1.0 &&
-                remainingEnergy > MIN_REFLECTION_ENERGY && segments.size() < MAX_SEGMENTS_PER_BEAM) {
+        // Continue bouncing infinitely until energy is depleted
+        while (remainingRange > 1.0 && remainingEnergy > MIN_REFLECTION_ENERGY && segments.size() < MAX_SEGMENTS_PER_BEAM) {
 
             double segmentRange = Math.min(remainingRange, 200);
             Vec3 endPos = currentPos.add(currentDir.scale(segmentRange));
@@ -218,14 +225,14 @@ public class PulsarCannonItem extends Item {
 
             remainingRange -= segmentLength;
 
-            // Continue bouncing like laser rifle - don't stop the main beam
-            if (hasBlockHit && bounces < MAX_BOUNCES && remainingRange > 1.0) {
+            // Infinite bouncing - continue until energy is depleted
+            if (hasBlockHit && remainingRange > 1.0) {
                 BlockPos hitBlockPos = hitResult.getBlockPos();
                 BlockState hitState = level.getBlockState(hitBlockPos);
                 float reflectivity = getEnhancedReflectivity(hitState);
 
                 if (reflectivity > 0.05) {
-                    // Calculate perfect reflection like laser rifle
+                    // Calculate perfect reflection
                     Vec3 normal = Vec3.atLowerCornerOf(hitResult.getDirection().getNormal());
                     Vec3 reflection = currentDir.subtract(normal.scale(2 * currentDir.dot(normal)));
 
@@ -249,7 +256,7 @@ public class PulsarCannonItem extends Item {
                     break;
                 }
             } else if (hasBlockHit) {
-                // Hit but can't bounce more - end beam
+                // Hit but no more range - end beam
                 break;
             }
         }
@@ -260,6 +267,11 @@ public class PulsarCannonItem extends Item {
     private static List<PhotonBeam> calculateEnhancedPhotonSplitting(PhotonBeam beam, OptimizedSegment lastSegment, int generation) {
         List<PhotonBeam> newBeams = new ArrayList<>();
 
+        // Check if this beam can still split
+        if (beam.splitGenerationsRemaining <= 0) {
+            return newBeams;
+        }
+
         double splitChance = BEAM_SPLIT_CHANCE * beam.intensity;
         if (beam.type == PhotonType.SPLIT) splitChance *= 0.9; // Splits can split again
         if (beam.type == PhotonType.SCATTERED) splitChance *= 0.6;
@@ -269,7 +281,10 @@ public class PulsarCannonItem extends Item {
         Vec3 incidentDir = lastSegment.end.subtract(lastSegment.start).normalize();
         Vec3 surfaceNormal = calculateSurfaceNormal(lastSegment.end, BlockPos.containing(lastSegment.end), incidentDir);
 
-        // Create more splits with laser-like behavior - these are offshoots, not replacements
+        // Create splits with laser-like behavior - offshoots get 50% of main beam's remaining bounces
+        int remainingBounces = MAX_BOUNCES; // Since we have infinite bounces, use a reasonable number for splits
+        int splitMaxBounces = Math.max(10, beam.bounces / 2); // 50% of current bounce count
+
         int splitCount = generation < 3 ? (3 + (int)(Math.random() * 4)) : (2 + (int)(Math.random() * 3));
 
         for (int i = 0; i < splitCount; i++) {
@@ -281,18 +296,14 @@ public class PulsarCannonItem extends Item {
             Vec3 splitAxis = rotateVectorAroundAxis(perpendicular, incidentDir, rotationAngle);
             Vec3 splitDirection = rotateVectorAroundAxis(incidentDir, splitAxis, baseAngle);
 
-            // Splits get more focused energy but don't take away from main beam
-            float splitEnergy = beam.energy * (0.3f + (float)Math.random() * 0.2f); // Don't divide by splitCount
-            double splitIntensity = beam.intensity * (0.6 + Math.random() * 0.3); // Higher intensity for splits
+            // Splits get independent energy but reduced generations for splitting
+            float splitEnergy = beam.energy * (0.3f + (float)Math.random() * 0.2f);
+            double splitIntensity = beam.intensity * (0.6 + Math.random() * 0.3);
 
-            // Splits get 50% of the bounces remaining from the original beam
-            int remainingBounces = MAX_BOUNCES - lastSegment.bounceCount;
-            int splitMaxBounces = Math.max(10, remainingBounces / 2); // At least 10 bounces, but 50% of remaining
-
-            // All splits are laser-like
+            // All splits are laser-like and have reduced split generations
             PhotonType newType = PhotonType.SPLIT;
 
-            // Create split beam starting from the impact point
+            // Create split beam starting from the impact point with reduced split generations
             PhotonBeam splitBeam = new PhotonBeam(
                     lastSegment.end.add(surfaceNormal.scale(0.01)),
                     splitDirection.normalize(),
@@ -303,7 +314,8 @@ public class PulsarCannonItem extends Item {
                     generation + 1,
                     splitIntensity,
                     newType,
-                    splitMaxBounces // Custom max bounces for this split
+                    splitMaxBounces,
+                    beam.splitGenerationsRemaining - 1 // Reduce split generations remaining
             );
             newBeams.add(splitBeam);
         }
@@ -344,7 +356,8 @@ public class PulsarCannonItem extends Item {
                     generation + 1,
                     beam.intensity * 0.3,
                     PhotonType.SCATTERED,
-                    scatterMaxBounces
+                    scatterMaxBounces,
+                    0 // Scattered beams can't split
             );
             scatteredBeams.add(scatteredBeam);
         }
@@ -396,8 +409,8 @@ public class PulsarCannonItem extends Item {
     }
 
     private static void applyEnhancedPhotonDamage(ServerLevel level, List<OptimizedSegment> segments, Entity shooter) {
-        // Use a map to track damage per entity instead of preventing multiple hits
-        Map<Entity, Float> entityDamageMap = new HashMap<>();
+        // Infinite piercing - allow all entities to be hit without restriction
+        Set<Entity> hitEntities = new HashSet<>();
 
         for (OptimizedSegment segment : segments) {
             AABB boundingBox = new AABB(segment.start, segment.end).inflate(
@@ -412,19 +425,15 @@ public class PulsarCannonItem extends Item {
                 if (preciseEntityIntersection(segment, entity)) {
                     float damage = segment.energy * getDamageMultiplier(segment.type);
 
-                    // Allow multiple hits but with diminishing returns
-                    float currentDamage = entityDamageMap.getOrDefault(entity, 0f);
-                    float effectiveDamage = damage * Math.max(0.3f, 1.0f - currentDamage * 0.02f);
-
-                    entityDamageMap.put(entity, currentDamage + effectiveDamage);
-
+                    // Infinite piercing - every beam segment can hit every entity
                     DamageSource damageSource = shooter instanceof Player player ?
                             level.damageSources().playerAttack(player) : level.damageSources().magic();
 
-                    if (entity.hurt(damageSource, effectiveDamage)) {
+                    if (entity.hurt(damageSource, damage)) {
                         Vec3 knockback = segment.end.subtract(segment.start).normalize()
-                                .scale(Math.min(2.5, effectiveDamage / BASE_DAMAGE * segment.intensity));
+                                .scale(Math.min(2.5, damage / BASE_DAMAGE * segment.intensity));
                         entity.setDeltaMovement(entity.getDeltaMovement().add(knockback.scale(0.3)));
+                        hitEntities.add(entity);
                     }
                 }
             }
@@ -440,7 +449,13 @@ public class PulsarCannonItem extends Item {
     }
 
     private static boolean preciseEntityIntersection(OptimizedSegment segment, Entity entity) {
-        return enhancedEntityIntersection(segment, entity);
+        // Simple AABB intersection for entity detection
+        AABB entityBounds = entity.getBoundingBox();
+        Vec3 start = segment.start;
+        Vec3 end = segment.end;
+
+        // Check if the line segment intersects with the entity's bounding box
+        return entityBounds.clip(start, end).isPresent();
     }
 
     // Enhanced utility methods
@@ -547,29 +562,30 @@ public class PulsarCannonItem extends Item {
         float energyLevel = 1.0f - ((float) stack.getDamageValue() / stack.getMaxDamage());
         int energyPercent = Math.round(energyLevel * 100);
 
-        tooltip.add(Component.literal("§d§l⚡ UNLIMITED PHOTON PULSAR ⚡"));
+        tooltip.add(Component.literal("§d§l⚡ INFINITE PIERCING PULSAR ⚡"));
         tooltip.add(Component.literal("§bEnergy: §f" + energyPercent + "%"));
-        tooltip.add(Component.literal("§7Damage: §c" + BASE_DAMAGE + " §7(Multi-Hit)"));
+        tooltip.add(Component.literal("§7Damage: §c" + BASE_DAMAGE + " §7(Infinite Pierce)"));
         tooltip.add(Component.literal("§7Max Range: §e" + (int)(MAX_RANGE/1000) + "km"));
-        tooltip.add(Component.literal("§7Max Bounces: §a" + MAX_BOUNCES + " §7(UNLIMITED)"));
+        tooltip.add(Component.literal("§7Max Bounces: §a∞ INFINITE"));
         tooltip.add(Component.literal("§7Energy Retention: §6" + (int)(DAMAGE_RETENTION * 1000) / 10.0f + "%"));
         tooltip.add(Component.literal("§7Split Retention: §6" + (int)(SPLIT_DAMAGE_RETENTION * 1000) / 10.0f + "%"));
-        tooltip.add(Component.literal("§7Pierce: §d∞ UNLIMITED §7+ Multi-Hit"));
-        tooltip.add(Component.literal("§7Split Chance: §5" + (int)(BEAM_SPLIT_CHANCE * 100) + "% §7(MAXIMUM)"));
-        tooltip.add(Component.literal("§7Photon Scatter: §3" + (int)(PHOTON_SPLIT_CHANCE * 100) + "% §7(EXTREME)"));
-        tooltip.add(Component.literal("§7Max Generations: §2" + MAX_GENERATIONS + " §7(UNLIMITED)"));
-        tooltip.add(Component.literal("§7Bounce Delay: §e" + BOUNCE_DELAY_TICKS + " tick §7(PRECISION)"));
+        tooltip.add(Component.literal("§7Pierce: §d∞ INFINITE §7(All Entities)"));
+        tooltip.add(Component.literal("§7Split Chance: §5" + (int)(BEAM_SPLIT_CHANCE * 100) + "%"));
+        tooltip.add(Component.literal("§7Photon Scatter: §3" + (int)(PHOTON_SPLIT_CHANCE * 100) + "%"));
+        tooltip.add(Component.literal("§7Max Generations: §2" + MAX_GENERATIONS));
+        tooltip.add(Component.literal("§7Bounce Delay: §e" + BOUNCE_DELAY_TICKS + " tick §7(Anti-Lag)"));
+        tooltip.add(Component.literal("§7Split Generations: §c" + MAX_SPLIT_GENERATIONS + " §7(Limited)"));
 
         if (energyLevel < 0.1f) {
             tooltip.add(Component.literal("§4§l⚠ CRITICAL ENERGY"));
         } else if (energyLevel > 0.9f) {
-            tooltip.add(Component.literal("§d§l✦ UNLIMITED PHOTONIC OVERDRIVE"));
+            tooltip.add(Component.literal("§d§l✦ INFINITE PIERCING OVERDRIVE"));
         }
 
         tooltip.add(Component.literal(""));
-        tooltip.add(Component.literal("§8\"Unlimited bouncing photon-laser hybrid\""));
-        tooltip.add(Component.literal("§8\"Decimates everything in enclosed spaces\""));
-        tooltip.add(Component.literal("§8\"Splits are offshoots, main beam continues\""));
+        tooltip.add(Component.literal("§8\"Infinite bouncing and piercing pulsar cannon\""));
+        tooltip.add(Component.literal("§8\"Offshoots get 50% of main beam bounces\""));
+        tooltip.add(Component.literal("§8\"Splits can only split " + MAX_SPLIT_GENERATIONS + " more times\""));
     }
 
     @Override
@@ -595,16 +611,23 @@ public class PulsarCannonItem extends Item {
         public final double intensity;
         public final PhotonType type;
         public final int maxBounces;
+        public final int splitGenerationsRemaining;
 
         public PhotonBeam(Vec3 position, Vec3 direction, float energy, int bounces,
                           Set<BlockPos> hitBlocks, boolean isSplit, int generation,
                           double intensity, PhotonType type) {
-            this(position, direction, energy, bounces, hitBlocks, isSplit, generation, intensity, type, MAX_BOUNCES);
+            this(position, direction, energy, bounces, hitBlocks, isSplit, generation, intensity, type, MAX_BOUNCES, MAX_SPLIT_GENERATIONS);
         }
 
         public PhotonBeam(Vec3 position, Vec3 direction, float energy, int bounces,
                           Set<BlockPos> hitBlocks, boolean isSplit, int generation,
                           double intensity, PhotonType type, int maxBounces) {
+            this(position, direction, energy, bounces, hitBlocks, isSplit, generation, intensity, type, maxBounces, MAX_SPLIT_GENERATIONS);
+        }
+
+        public PhotonBeam(Vec3 position, Vec3 direction, float energy, int bounces,
+                          Set<BlockPos> hitBlocks, boolean isSplit, int generation,
+                          double intensity, PhotonType type, int maxBounces, int splitGenerationsRemaining) {
             this.position = position;
             this.direction = direction;
             this.energy = energy;
@@ -615,6 +638,7 @@ public class PulsarCannonItem extends Item {
             this.intensity = intensity;
             this.type = type;
             this.maxBounces = maxBounces;
+            this.splitGenerationsRemaining = splitGenerationsRemaining;
         }
     }
 
