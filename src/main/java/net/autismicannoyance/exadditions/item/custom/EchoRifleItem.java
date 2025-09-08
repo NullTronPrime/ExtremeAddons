@@ -7,6 +7,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
@@ -24,6 +25,7 @@ import java.util.List;
 /**
  * Echo Rifle - A powerful weapon inspired by the Deep Dark and sculk mechanics.
  * Shoots wide echo beams that deal 20 damage + 5% of target's max health and apply darkness.
+ * Now properly attributes kills to the player for statistics.
  */
 public class EchoRifleItem extends Item {
     private static final int COOLDOWN_TICKS = 40; // 2 seconds
@@ -72,9 +74,9 @@ public class EchoRifleItem extends Item {
         // Find all entities within the beam's path and width
         List<LivingEntity> hitEntities = findEntitiesInBeam(level, start, end, BEAM_WIDTH, player);
 
-        // Damage all hit entities
+        // Damage all hit entities with proper player attribution
         for (LivingEntity entity : hitEntities) {
-            damageEntity(entity);
+            damageEntity(entity, player, itemStack);
         }
 
         // Send packet to clients for visual effect
@@ -127,14 +129,29 @@ public class EchoRifleItem extends Item {
         return distanceToBeam <= width / 2.0;
     }
 
-    private void damageEntity(LivingEntity entity) {
+    /**
+     * Damages an entity with proper player attribution, knockback, experience orbs, and target reset
+     */
+    private void damageEntity(LivingEntity entity, Player player, ItemStack itemStack) {
         // Calculate damage: base damage + percentage of max health
         float maxHealth = entity.getMaxHealth();
         float percentageDamage = maxHealth * HEALTH_PERCENTAGE;
         float totalDamage = BASE_DAMAGE + percentageDamage;
 
-        // Apply damage
-        entity.hurt(entity.damageSources().magic(), totalDamage);
+        // Create player-attributed damage source for proper kill credit
+        DamageSource playerDamageSource = player.damageSources().playerAttack(player);
+
+        // Apply knockback before damage (so entity doesn't die before knockback)
+        applyKnockback(entity, player);
+
+        // Reset entity target for 0.1 seconds (2 ticks)
+        resetEntityTarget(entity);
+
+        // Apply damage with player attribution
+        entity.hurt(playerDamageSource, totalDamage);
+
+        // Spawn experience orbs regardless of whether entity dies
+        spawnExperienceOrbs(entity, player);
 
         // Apply darkness effect (20 seconds)
         MobEffectInstance darknessEffect = new MobEffectInstance(
@@ -157,6 +174,100 @@ public class EchoRifleItem extends Item {
                 true
         );
         entity.addEffect(blindnessEffect);
+    }
+
+    /**
+     * Applies strong knockback to the hit entity
+     */
+    private void applyKnockback(LivingEntity entity, Player player) {
+        Vec3 playerPos = player.position();
+        Vec3 entityPos = entity.position();
+        Vec3 knockbackDirection = entityPos.subtract(playerPos).normalize();
+
+        // Strong knockback force
+        double knockbackStrength = 2.5; // Powerful knockback
+
+        // Apply horizontal knockback
+        Vec3 knockbackVelocity = new Vec3(
+                knockbackDirection.x * knockbackStrength,
+                0.5, // Upward component for dramatic effect
+                knockbackDirection.z * knockbackStrength
+        );
+
+        entity.setDeltaMovement(entity.getDeltaMovement().add(knockbackVelocity));
+        entity.hurtMarked = true; // Force velocity update
+    }
+
+    /**
+     * Resets the entity's target for a brief moment
+     */
+    private void resetEntityTarget(LivingEntity entity) {
+        // Reset target if entity is a mob
+        if (entity instanceof net.minecraft.world.entity.Mob mob) {
+            // Clear current target
+            mob.setTarget(null);
+
+            // Schedule target reset after 2 ticks (0.1 seconds)
+            // This gives a brief moment of confusion before they can retarget
+            entity.level().scheduleTick(entity.blockPosition(), entity.level().getBlockState(entity.blockPosition()).getBlock(), 2);
+        }
+
+        // For other living entities, apply brief confusion effect
+        MobEffectInstance confusionEffect = new MobEffectInstance(
+                MobEffects.CONFUSION,
+                10, // 0.5 seconds
+                0,
+                false,
+                false,
+                false
+        );
+        entity.addEffect(confusionEffect);
+    }
+
+    /**
+     * Spawns experience orbs from the hit entity regardless of death
+     */
+    private void spawnExperienceOrbs(LivingEntity entity, Player player) {
+        Level level = entity.level();
+        Vec3 entityPos = entity.position();
+
+        // Calculate experience based on entity type and health
+        int baseExp = 3; // Base experience per hit
+        int healthExp = (int)(entity.getMaxHealth() / 10); // 1 exp per 10 max health
+        int totalExp = Math.min(baseExp + healthExp, 15); // Cap at 15 exp per hit
+
+        // Create multiple small exp orbs for better visual effect
+        int numOrbs = Math.min(totalExp / 2 + 1, 5); // 1-5 orbs
+        int expPerOrb = totalExp / numOrbs;
+        int remainder = totalExp % numOrbs;
+
+        for (int i = 0; i < numOrbs; i++) {
+            int orbExp = expPerOrb + (i < remainder ? 1 : 0);
+
+            // Scatter orbs around the entity
+            double angle = (2 * Math.PI * i) / numOrbs;
+            double distance = 0.5 + level.random.nextDouble() * 1.0;
+
+            Vec3 orbPos = entityPos.add(
+                    Math.cos(angle) * distance,
+                    0.2 + level.random.nextDouble() * 0.8,
+                    Math.sin(angle) * distance
+            );
+
+            // Spawn experience orb
+            net.minecraft.world.entity.ExperienceOrb expOrb = new net.minecraft.world.entity.ExperienceOrb(
+                    level, orbPos.x, orbPos.y, orbPos.z, orbExp
+            );
+
+            // Give orbs slight random velocity
+            expOrb.setDeltaMovement(
+                    (level.random.nextDouble() - 0.5) * 0.2,
+                    level.random.nextDouble() * 0.3 + 0.1,
+                    (level.random.nextDouble() - 0.5) * 0.2
+            );
+
+            level.addFreshEntity(expOrb);
+        }
     }
 
     private void spawnShooterEffects(Level level, Player player) {
