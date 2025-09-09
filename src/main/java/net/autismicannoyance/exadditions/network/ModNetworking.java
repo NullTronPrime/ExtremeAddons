@@ -41,11 +41,7 @@ public final class ModNetworking {
         CHANNEL.registerMessage(id(), EyeEffectPacket.class,
                 EyeEffectPacket::encode, EyeEffectPacket::decode, EyeEffectPacket::handle);
 
-        // FIXED: Register the OrbitalEyeRenderPacket properly
-        CHANNEL.registerMessage(id(), OrbitalEyeRenderPacket.class,
-                OrbitalEyeRenderPacket::encode, OrbitalEyeRenderPacket::decode, OrbitalEyeRenderPacket::handle);
-
-        // Black hole effect packet - send from server to clients to spawn black hole visuals
+             // Black hole effect packet - send from server to clients to spawn black hole visuals
         CHANNEL.registerMessage(id(), BlackHoleEffectPacket.class,
                 BlackHoleEffectPacket::encode, BlackHoleEffectPacket::decode, BlackHoleEffectPacket::handle);
 
