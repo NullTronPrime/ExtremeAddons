@@ -208,6 +208,7 @@ public class MeteoriteWandItem extends Item {
         // Send packet to clients
         MeteoriteEffectPacket packet = new MeteoriteEffectPacket(
                 startPos, endPos, velocity, type.size, lifetimeTicks, meteorId,
+
                 true, type.coreColor, type.trailColor, 1.0f
         );
 
