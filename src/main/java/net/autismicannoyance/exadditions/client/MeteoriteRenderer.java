@@ -2,20 +2,15 @@ package net.autismicannoyance.exadditions.client;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.particle.Particle;
-import net.minecraft.client.particle.ParticleEngine;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.util.Mth;
+import net.minecraft.util.RandomSource;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
-import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
-import net.minecraft.util.RandomSource;
+import net.minecraftforge.fml.common.Mod;
+import net.autismicannoyance.exadditions.ExAdditions;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,10 +19,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * Enhanced meteorite renderer that creates realistic falling meteors with proper trails
  */
 @OnlyIn(Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, value = Dist.CLIENT)
 public class MeteoriteRenderer {
 
     private static final Map<Integer, MeteoriteInstance> activeMeteorites = new ConcurrentHashMap<>();
-    private static final Random random = new Random();
+    private static final RandomSource random = RandomSource.create();
 
     public static void spawnMeteorite(Vec3 startPos, Vec3 endPos, Vec3 velocity, float size,
                                       int lifetimeTicks, int meteoriteId, boolean hasTrail,
@@ -39,6 +35,13 @@ public class MeteoriteRenderer {
         );
 
         activeMeteorites.put(meteoriteId, meteorite);
+
+        // Debug message
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            mc.player.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                    "§aSpawned meteor " + meteoriteId + " at " + (int)startPos.x + ", " + (int)startPos.y + ", " + (int)startPos.z), false);
+        }
     }
 
     @SubscribeEvent
@@ -144,7 +147,7 @@ public class MeteoriteRenderer {
 
     private static void createMeteoriteCore(ClientLevel level, Vec3 pos, float size, boolean isLarge, boolean isMedium) {
         // Create the rocky core using multiple particle layers
-        int coreParticles = Math.max(3, (int)(size * 2));
+        int coreParticles = Math.max(10, (int)(size * 8)); // More particles for visibility
 
         for (int i = 0; i < coreParticles; i++) {
             // Inner core - bright and hot
@@ -184,7 +187,7 @@ public class MeteoriteRenderer {
         }
 
         // Outer shell - darker, rocky appearance
-        int shellParticles = Math.max(2, (int)(size * 1.5));
+        int shellParticles = Math.max(5, (int)(size * 4));
         for (int i = 0; i < shellParticles; i++) {
             Vec3 shellOffset = new Vec3(
                     (random.nextDouble() - 0.5) * size * 0.8,
@@ -203,11 +206,15 @@ public class MeteoriteRenderer {
                         shellPos.x, shellPos.y, shellPos.z, 0, 0, 0);
             }
         }
+
+        // Add extra bright core for visibility
+        level.addParticle(ParticleTypes.EXPLOSION_EMITTER,
+                pos.x, pos.y, pos.z, 0, 0, 0);
     }
 
     private static void createDebrisParticles(ClientLevel level, Vec3 pos, float size) {
         // Create debris particles flying off the meteorite
-        int debrisCount = Math.max(1, (int)(size));
+        int debrisCount = Math.max(3, (int)(size * 2));
 
         for (int i = 0; i < debrisCount; i++) {
             Vec3 debrisVelocity = new Vec3(
@@ -236,7 +243,7 @@ public class MeteoriteRenderer {
 
     private static void createImpactEffects(ClientLevel level, Vec3 impactPos, float size) {
         // Create dramatic impact effects when meteorite hits the ground
-        int explosionParticles = Math.max(20, (int)(size * 30));
+        int explosionParticles = Math.max(30, (int)(size * 50)); // More particles
 
         for (int i = 0; i < explosionParticles; i++) {
             Vec3 explosionVel = new Vec3(
@@ -296,7 +303,7 @@ public class MeteoriteRenderer {
         }
 
         // Add smoke cloud for impact
-        for (int i = 0; i < size * 10; i++) {
+        for (int i = 0; i < size * 15; i++) {
             Vec3 smokeVel = new Vec3(
                     (random.nextDouble() - 0.5) * 0.2,
                     random.nextDouble() * 0.3,
@@ -312,6 +319,13 @@ public class MeteoriteRenderer {
             level.addParticle(ParticleTypes.LARGE_SMOKE,
                     smokePos.x, smokePos.y, smokePos.z,
                     smokeVel.x, smokeVel.y, smokeVel.z);
+        }
+
+        // Debug message for impact
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            mc.player.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                    "§cMeteor impact at " + (int)impactPos.x + ", " + (int)impactPos.y + ", " + (int)impactPos.z), false);
         }
     }
 
