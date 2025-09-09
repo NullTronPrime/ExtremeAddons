@@ -26,38 +26,34 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Spherical orbital eye renderer with customizable colors and pulse lasers
- * Supports attachment to both entities and items
+ * Anatomically correct orbital eye renderer with full articulation
+ * Features realistic eye structure with sclera, conjunctiva, cornea, iris, pupil, and lens
  */
 @Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, value = Dist.CLIENT)
 public final class OrbitalEyeRenderer {
     private static final Map<Integer, OrbitalEyeData> EFFECTS = new ConcurrentHashMap<>();
     private static final Random RAND = new Random();
 
-    // Rendering constants for spherical eyes
-    private static final int SPHERE_LAT_SEGMENTS = 16;
-    private static final int SPHERE_LON_SEGMENTS = 20;
-    private static final int CLIENT_TTL = 40;
+    // Rendering constants
+    private static final int CLIENT_TTL = 100;
 
-    // Performance settings
-    private static final double LOD_DISTANCE_HIGH = 12.0;
-    private static final double LOD_DISTANCE_MED = 24.0;
-    private static final double LOD_DISTANCE_LOW = 48.0;
+    // Performance LOD distances
+    private static final double LOD_DISTANCE_HIGH = 15.0;
+    private static final double LOD_DISTANCE_MED = 30.0;
+    private static final double LOD_DISTANCE_LOW = 60.0;
 
-    // Animation settings
-    private static final float PULSE_SPEED = 0.1f;
-    private static final float LASER_PULSE_DURATION = 0.3f; // 30% of firing cycle
+    // Animation timing
+    private static final float PULSE_SPEED = 0.15f;
+    private static final float LASER_PULSE_DURATION = 0.4f;
+    private static final float BLINK_SPEED = 0.08f;
+    private static final float SACCADE_SPEED = 0.12f;
 
-    // Pre-calculated sphere geometry at different LOD levels
-    private static List<Vec3> HIGH_DETAIL_SPHERE;
-    private static List<Vec3> MED_DETAIL_SPHERE;
-    private static List<Vec3> LOW_DETAIL_SPHERE;
-
-    static {
-        HIGH_DETAIL_SPHERE = generateSphereVertices(16, 20);
-        MED_DETAIL_SPHERE = generateSphereVertices(12, 16);
-        LOW_DETAIL_SPHERE = generateSphereVertices(8, 12);
-    }
+    // Anatomical proportions (relative to eye radius)
+    private static final float CORNEA_SIZE = 0.45f;
+    private static final float PUPIL_MIN_SIZE = 0.15f;
+    private static final float PUPIL_MAX_SIZE = 0.35f;
+    private static final float IRIS_SIZE = 0.4f;
+    private static final float CONJUNCTIVA_THICKNESS = 1.002f; // Slightly larger than sclera
 
     public static void handlePacket(OrbitalEyeRenderPacket msg) {
         int targetId = msg.targetId;
@@ -84,9 +80,15 @@ public final class OrbitalEyeRenderer {
             inst.pulseIntensity = e.pulseIntensity;
             inst.laserColor = e.laserColor;
 
-            // Initialize animation values
+            // Initialize anatomical animation values
             inst.pulseTimer = RAND.nextFloat();
-            inst.rotationOffset = RAND.nextFloat() * (float)(Math.PI * 2);
+            inst.blinkTimer = RAND.nextFloat() * 100.0f;
+            inst.saccadeTimer = RAND.nextFloat();
+            inst.pupilSize = PUPIL_MIN_SIZE + (PUPIL_MAX_SIZE - PUPIL_MIN_SIZE) * 0.5f;
+            inst.targetLookDirection = inst.lookDirection != null ? inst.lookDirection : Vec3.ZERO;
+            inst.currentLookDirection = inst.targetLookDirection;
+            inst.bloodshotIntensity = 0.0f;
+            inst.fatigueLevel = 0.0f;
 
             data.eyes.add(inst);
         }
@@ -113,10 +115,9 @@ public final class OrbitalEyeRenderer {
         Tesselator tesselator = Tesselator.getInstance();
         BufferBuilder buffer = tesselator.getBuilder();
 
-        // Separate opaque and transparent eyes
-        List<RenderableEye> opaqueEyes = new ArrayList<>();
-        List<RenderableEye> transparentEyes = new ArrayList<>();
+        List<RenderableEye> renderableEyes = new ArrayList<>();
 
+        // Process all eyes and build renderable list
         Iterator<Map.Entry<Integer, OrbitalEyeData>> it = EFFECTS.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<Integer, OrbitalEyeData> entry = it.next();
@@ -134,165 +135,376 @@ public final class OrbitalEyeRenderer {
             }
 
             Vec3 targetPos = getTargetPosition(target, partialTick);
-            double distanceToTarget = targetPos.distanceTo(cameraPos);
 
             for (OrbitalEyeInstance eye : data.eyes) {
-                updateEyeAnimation(eye, partialTick);
+                updateAnatomicalAnimation(eye, partialTick);
 
                 Vec3 eyeWorldPos = targetPos.add(eye.offset);
                 double distanceToCamera = eyeWorldPos.distanceTo(cameraPos);
 
-                // Skip very distant eyes
                 if (distanceToCamera > LOD_DISTANCE_LOW) continue;
 
                 int lodLevel = determineLODLevel(distanceToCamera);
                 Quaternionf orientation = calculateEyeOrientation(eye, eyeWorldPos, cameraPos);
 
-                RenderableEye renderableEye = new RenderableEye(eye, eyeWorldPos, orientation,
-                        lodLevel, distanceToCamera);
-
-                // Separate by transparency
-                float alpha = getEyeAlpha(eye);
-                if (alpha >= 0.95f) {
-                    opaqueEyes.add(renderableEye);
-                } else {
-                    transparentEyes.add(renderableEye);
-                }
+                renderableEyes.add(new RenderableEye(eye, eyeWorldPos, orientation, lodLevel, distanceToCamera));
             }
         }
 
-        // Render opaque eyes first (front-to-back)
-        opaqueEyes.sort(Comparator.comparingDouble(e -> e.distanceToCamera));
-        if (!opaqueEyes.isEmpty()) {
-            RenderSystem.depthMask(true);
-            buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-            for (RenderableEye eye : opaqueEyes) {
-                renderSphericalEye(buffer, poseMatrix, eye, cameraPos);
-            }
-            tesselator.end();
-        }
+        // Sort by distance (back to front for transparency)
+        renderableEyes.sort(Comparator.comparingDouble(e -> -e.distanceToCamera));
 
-        // Render transparent eyes (back-to-front)
-        transparentEyes.sort(Comparator.comparingDouble(e -> -e.distanceToCamera));
-        if (!transparentEyes.isEmpty()) {
-            RenderSystem.depthMask(false);
-            buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-            for (RenderableEye eye : transparentEyes) {
-                renderSphericalEye(buffer, poseMatrix, eye, cameraPos);
-            }
-            tesselator.end();
-            RenderSystem.depthMask(true);
-        }
-
-        // Render laser pulses separately
-        renderLaserPulses(opaqueEyes, transparentEyes, poseMatrix, cameraPos);
+        // Render eye components in anatomical order
+        renderEyeComponents(renderableEyes, buffer, tesselator, poseMatrix, cameraPos);
+        renderLaserEffects(renderableEyes);
 
         RenderSystem.enableCull();
         RenderSystem.disableBlend();
     }
 
-    private static void renderSphericalEye(BufferBuilder buffer, Matrix4f poseMatrix, RenderableEye renderableEye, Vec3 cameraPos) {
-        OrbitalEyeInstance eye = renderableEye.eye;
-        Vec3 eyePos = renderableEye.worldPos;
-        Quaternionf orientation = renderableEye.orientation;
-        int lodLevel = renderableEye.lodLevel;
+    private static void renderEyeComponents(List<RenderableEye> eyes, BufferBuilder buffer,
+                                            Tesselator tesselator, Matrix4f poseMatrix, Vec3 cameraPos) {
+        if (eyes.isEmpty()) return;
 
-        float radius = eye.radius;
-        float blinkScale = 1.0f - eye.blinkPhase * 0.8f; // Eyes shrink when blinking
-        float pulseScale = eye.isPulsing ? 1.0f + eye.pulseIntensity * 0.2f : 1.0f;
-        float finalRadius = radius * blinkScale * pulseScale;
+        // 1. Render sclera (eyeball base) - opaque
+        RenderSystem.depthMask(true);
+        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+        for (RenderableEye eye : eyes) {
+            renderSclera(buffer, poseMatrix, eye, cameraPos);
+        }
+        tesselator.end();
 
-        List<Vec3> sphereVertices = getSphereForLOD(lodLevel);
-
-        // Render sclera (eye white)
-        renderSpherePart(buffer, poseMatrix, sphereVertices, eyePos, finalRadius,
-                orientation, eye.scleraColor, cameraPos, 0.0f);
-
-        // Render pupil (smaller sphere, offset towards look direction)
-        if (lodLevel > 0) { // Skip pupil at lowest LOD
-            float pupilRadius = finalRadius * 0.4f;
-            Vec3 pupilOffset = calculatePupilOffset(eye, orientation, finalRadius * 0.3f);
-            Vec3 pupilPos = eyePos.add(pupilOffset);
-
-            renderSpherePart(buffer, poseMatrix, sphereVertices, pupilPos, pupilRadius,
-                    orientation, eye.pupilColor, cameraPos, 0.001f);
-
-            // Render iris (even smaller, same position as pupil but slightly forward)
-            if (lodLevel > 1) { // Skip iris at medium and low LOD
-                float irisRadius = pupilRadius * 0.3f;
-                Vec3 irisPos = pupilPos.add(getForwardVector(orientation).scale(0.002));
-
-                renderSpherePart(buffer, poseMatrix, getSphereForLOD(2), irisPos, irisRadius,
-                        orientation, eye.irisColor, cameraPos, 0.002f);
+        // 2. Render conjunctiva with blood vessels - semi-transparent
+        RenderSystem.depthMask(false);
+        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+        for (RenderableEye eye : eyes) {
+            if (eye.lodLevel > 0) {
+                renderConjunctiva(buffer, poseMatrix, eye, cameraPos);
             }
         }
+        tesselator.end();
+
+        // 3. Render iris (colored part) - opaque
+        RenderSystem.depthMask(true);
+        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+        for (RenderableEye eye : eyes) {
+            if (eye.lodLevel > 0) {
+                renderIris(buffer, poseMatrix, eye, cameraPos);
+            }
+        }
+        tesselator.end();
+
+        // 4. Render pupil (black center) - opaque
+        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+        for (RenderableEye eye : eyes) {
+            if (eye.lodLevel > 0) {
+                renderPupil(buffer, poseMatrix, eye, cameraPos);
+            }
+        }
+        tesselator.end();
+
+        // 5. Render cornea (transparent protective layer)
+        RenderSystem.depthMask(false);
+        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+        for (RenderableEye eye : eyes) {
+            if (eye.lodLevel > 1) {
+                renderCornea(buffer, poseMatrix, eye, cameraPos);
+            }
+        }
+        tesselator.end();
+
+        // 6. Render lens highlights and reflections
+        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+        for (RenderableEye eye : eyes) {
+            if (eye.lodLevel > 1) {
+                renderLensHighlights(buffer, poseMatrix, eye, cameraPos);
+            }
+        }
+        tesselator.end();
+
+        // 7. Render eyelid shadow when blinking
+        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+        for (RenderableEye eye : eyes) {
+            if (eye.eye.isBlinking && eye.lodLevel > 0) {
+                renderEyelidShadow(buffer, poseMatrix, eye, cameraPos);
+            }
+        }
+        tesselator.end();
+
+        RenderSystem.depthMask(true);
     }
 
-    private static void renderSpherePart(BufferBuilder buffer, Matrix4f poseMatrix, List<Vec3> sphereVertices,
-                                         Vec3 center, float radius, Quaternionf orientation, int color,
-                                         Vec3 cameraPos, float depthBias) {
-        float[] rgba = unpackColor(color);
-        Vec3 biasedCenter = center.add(getForwardVector(orientation).scale(depthBias));
-        Vec3 relativeCenter = biasedCenter.subtract(cameraPos);
+    private static void renderSclera(BufferBuilder buffer, Matrix4f poseMatrix, RenderableEye renderableEye, Vec3 cameraPos) {
+        OrbitalEyeInstance eye = renderableEye.eye;
+        Vec3 eyePos = renderableEye.worldPos;
 
-        for (int i = 0; i < sphereVertices.size(); i += 3) {
-            Vec3 v1 = transformSphereVertex(sphereVertices.get(i), biasedCenter, radius, orientation, cameraPos);
-            Vec3 v2 = transformSphereVertex(sphereVertices.get(i + 1), biasedCenter, radius, orientation, cameraPos);
-            Vec3 v3 = transformSphereVertex(sphereVertices.get(i + 2), biasedCenter, radius, orientation, cameraPos);
+        float radius = eye.radius * getBlinkScale(eye) * getPulseScale(eye);
 
-            addTriangle(buffer, poseMatrix, v1, v2, v3, rgba);
+        // Add bloodshot effects to sclera color
+        int baseColor = eye.scleraColor;
+        if (eye.bloodshotIntensity > 0.0f) {
+            baseColor = blendColors(baseColor, 0xFFFF6666, eye.bloodshotIntensity * 0.3f);
+        }
+
+        renderSphere(buffer, poseMatrix, eyePos, radius, baseColor, renderableEye.orientation,
+                cameraPos, 0.0f, renderableEye.lodLevel);
+    }
+
+    private static void renderConjunctiva(BufferBuilder buffer, Matrix4f poseMatrix, RenderableEye renderableEye, Vec3 cameraPos) {
+        OrbitalEyeInstance eye = renderableEye.eye;
+        Vec3 eyePos = renderableEye.worldPos;
+
+        float radius = eye.radius * getBlinkScale(eye) * getPulseScale(eye) * CONJUNCTIVA_THICKNESS;
+
+        // Semi-transparent with blood vessel coloring
+        int conjunctivaColor = 0x30FFFFFF; // Transparent white base
+        if (eye.bloodshotIntensity > 0.0f) {
+            int redTint = (int) (255 * eye.bloodshotIntensity * 0.5f);
+            conjunctivaColor = (0x30 << 24) | (redTint << 16) | (0x88 << 8) | 0x88;
+        }
+
+        renderSphere(buffer, poseMatrix, eyePos, radius, conjunctivaColor, renderableEye.orientation,
+                cameraPos, 0.001f, Math.max(0, renderableEye.lodLevel - 1));
+    }
+
+    private static void renderIris(BufferBuilder buffer, Matrix4f poseMatrix, RenderableEye renderableEye, Vec3 cameraPos) {
+        OrbitalEyeInstance eye = renderableEye.eye;
+        Vec3 eyePos = renderableEye.worldPos;
+
+        float eyeRadius = eye.radius * getBlinkScale(eye) * getPulseScale(eye);
+        Vec3 lookOffset = calculateLookOffset(eye, renderableEye.orientation, eyeRadius * 0.15f);
+        Vec3 irisPos = eyePos.add(lookOffset);
+
+        float irisRadius = eyeRadius * IRIS_SIZE;
+
+        // Add pulsing effect to iris color when firing
+        int irisColor = eye.irisColor;
+        if (eye.isPulsing) {
+            irisColor = blendColors(irisColor, eye.laserColor, eye.pulseIntensity * 0.4f);
+        }
+
+        // Position iris slightly forward
+        Vec3 forwardOffset = getForwardVector(renderableEye.orientation).scale(0.003);
+        Vec3 finalIrisPos = irisPos.add(forwardOffset);
+
+        renderFlatDisc(buffer, poseMatrix, finalIrisPos, irisRadius, irisColor,
+                renderableEye.orientation, cameraPos, 0.003f, renderableEye.lodLevel);
+    }
+
+    private static void renderPupil(BufferBuilder buffer, Matrix4f poseMatrix, RenderableEye renderableEye, Vec3 cameraPos) {
+        OrbitalEyeInstance eye = renderableEye.eye;
+        Vec3 eyePos = renderableEye.worldPos;
+
+        float eyeRadius = eye.radius * getBlinkScale(eye) * getPulseScale(eye);
+        Vec3 lookOffset = calculateLookOffset(eye, renderableEye.orientation, eyeRadius * 0.15f);
+        Vec3 pupilPos = eyePos.add(lookOffset);
+
+        float pupilRadius = eyeRadius * eye.pupilSize;
+
+        // Pupil can glow when firing lasers
+        int pupilColor = eye.pupilColor;
+        if (eye.firing && eye.isPulsing) {
+            pupilColor = blendColors(pupilColor, eye.laserColor, eye.pulseIntensity * 0.6f);
+        }
+
+        // Position pupil more forward than iris
+        Vec3 forwardOffset = getForwardVector(renderableEye.orientation).scale(0.004);
+        Vec3 finalPupilPos = pupilPos.add(forwardOffset);
+
+        renderFlatDisc(buffer, poseMatrix, finalPupilPos, pupilRadius, pupilColor,
+                renderableEye.orientation, cameraPos, 0.004f, renderableEye.lodLevel);
+    }
+
+    private static void renderCornea(BufferBuilder buffer, Matrix4f poseMatrix, RenderableEye renderableEye, Vec3 cameraPos) {
+        OrbitalEyeInstance eye = renderableEye.eye;
+        Vec3 eyePos = renderableEye.worldPos;
+
+        float eyeRadius = eye.radius * getBlinkScale(eye) * getPulseScale(eye);
+        float corneaRadius = eyeRadius * CORNEA_SIZE;
+
+        // Position cornea at front of eye
+        Vec3 forwardOffset = getForwardVector(renderableEye.orientation).scale(eyeRadius * 0.1);
+        Vec3 corneaPos = eyePos.add(forwardOffset);
+
+        // Transparent dome effect
+        int corneaColor = 0x15FFFFFF;
+
+        renderDome(buffer, poseMatrix, corneaPos, corneaRadius, corneaColor,
+                renderableEye.orientation, cameraPos, 0.005f, renderableEye.lodLevel);
+    }
+
+    private static void renderLensHighlights(BufferBuilder buffer, Matrix4f poseMatrix, RenderableEye renderableEye, Vec3 cameraPos) {
+        OrbitalEyeInstance eye = renderableEye.eye;
+        Vec3 eyePos = renderableEye.worldPos;
+
+        float eyeRadius = eye.radius * getBlinkScale(eye) * getPulseScale(eye);
+
+        // Calculate light reflection
+        Vec3 lightDir = new Vec3(0.3, 0.7, 0.6).normalize();
+        Vec3 viewDir = cameraPos.subtract(eyePos).normalize();
+        Vec3 reflectDir = reflect(lightDir, getForwardVector(renderableEye.orientation));
+
+        float reflectIntensity = (float) Math.max(0.0, viewDir.dot(reflectDir));
+        if (reflectIntensity > 0.3f) {
+            float highlightRadius = eyeRadius * 0.08f;
+            Vec3 highlightOffset = reflectDir.scale(eyeRadius * 0.05);
+            Vec3 highlightPos = eyePos.add(highlightOffset);
+
+            int alpha = (int) (255 * (reflectIntensity - 0.3f) / 0.7f);
+            int highlightColor = (alpha << 24) | 0xFFFFFF;
+
+            renderSphere(buffer, poseMatrix, highlightPos, highlightRadius, highlightColor,
+                    renderableEye.orientation, cameraPos, 0.006f, 2);
         }
     }
 
-    private static void renderLaserPulses(List<RenderableEye> opaqueEyes, List<RenderableEye> transparentEyes,
-                                          Matrix4f poseMatrix, Vec3 cameraPos) {
-        List<RenderableEye> allEyes = new ArrayList<>();
-        allEyes.addAll(opaqueEyes);
-        allEyes.addAll(transparentEyes);
+    private static void renderEyelidShadow(BufferBuilder buffer, Matrix4f poseMatrix, RenderableEye renderableEye, Vec3 cameraPos) {
+        OrbitalEyeInstance eye = renderableEye.eye;
+        if (eye.blinkPhase < 0.1f) return;
 
-        for (RenderableEye renderableEye : allEyes) {
+        Vec3 eyePos = renderableEye.worldPos;
+        float eyeRadius = eye.radius * getPulseScale(eye);
+
+        float shadowIntensity = eye.blinkPhase;
+        float shadowRadius = eyeRadius * (1.0f + shadowIntensity * 0.3f);
+
+        int shadowColor = (int) (100 * shadowIntensity) << 24;
+
+        renderSphere(buffer, poseMatrix, eyePos, shadowRadius, shadowColor,
+                renderableEye.orientation, cameraPos, 0.007f, Math.max(0, renderableEye.lodLevel - 1));
+    }
+
+    // Core rendering primitives using VectorRenderer
+    private static void renderSphere(BufferBuilder buffer, Matrix4f poseMatrix, Vec3 center, float radius,
+                                     int color, Quaternionf orientation, Vec3 cameraPos, float depthBias, int lodLevel) {
+        int segments = getLODSegments(lodLevel);
+
+        // Use VectorRenderer for sphere rendering
+        VectorRenderer.drawSphereWorld(center, radius, color, segments, segments * 2,
+                false, 1, VectorRenderer.Transform.IDENTITY);
+    }
+
+    private static void renderFlatDisc(BufferBuilder buffer, Matrix4f poseMatrix, Vec3 center, float radius,
+                                       int color, Quaternionf orientation, Vec3 cameraPos, float depthBias, int lodLevel) {
+        int segments = getLODSegments(lodLevel);
+
+        // Create disc as flat polygon
+        List<Vec3> discPoints = new ArrayList<>();
+        for (int i = 0; i < segments; i++) {
+            double angle = 2.0 * Math.PI * i / segments;
+            double x = Math.cos(angle) * radius;
+            double z = Math.sin(angle) * radius;
+
+            // Transform by orientation
+            Vector3f localPoint = new Vector3f((float) x, 0, (float) z);
+            orientation.transform(localPoint);
+
+            Vec3 worldPoint = center.add(localPoint.x(), localPoint.y(), localPoint.z());
+            discPoints.add(worldPoint);
+        }
+
+        VectorRenderer.drawFilledPolygonWorld(discPoints, color, false, 1, VectorRenderer.Transform.IDENTITY);
+    }
+
+    private static void renderDome(BufferBuilder buffer, Matrix4f poseMatrix, Vec3 center, float radius,
+                                   int color, Quaternionf orientation, Vec3 cameraPos, float depthBias, int lodLevel) {
+        // Render as partial sphere (dome)
+        int segments = getLODSegments(lodLevel);
+        VectorRenderer.drawSphereWorld(center, radius, color, segments / 2, segments,
+                false, 1, VectorRenderer.Transform.IDENTITY);
+    }
+
+    private static void renderLaserEffects(List<RenderableEye> eyes) {
+        for (RenderableEye renderableEye : eyes) {
             OrbitalEyeInstance eye = renderableEye.eye;
             if (eye.firing && eye.laserEnd != null && eye.isPulsing && eye.pulseIntensity > 0.1f) {
-                float beamThickness = 0.02f + eye.pulseIntensity * 0.08f;
+                float beamThickness = 0.03f + eye.pulseIntensity * 0.1f;
                 int beamColor = modulateColorAlpha(eye.laserColor, eye.pulseIntensity);
 
-                VectorRenderer.drawLineWorld(
-                        renderableEye.worldPos,
-                        eye.laserEnd,
-                        beamColor,
-                        beamThickness,
-                        false,
-                        1,
-                        VectorRenderer.Transform.IDENTITY
-                );
+                VectorRenderer.drawLineWorld(renderableEye.worldPos, eye.laserEnd, beamColor,
+                        beamThickness, false, 1, VectorRenderer.Transform.IDENTITY);
 
                 // Add pulse effect at laser end
                 if (eye.pulseIntensity > 0.5f) {
-                    float pulseRadius = 0.1f + eye.pulseIntensity * 0.2f;
-                    int pulseColor = modulateColorAlpha(eye.laserColor, eye.pulseIntensity * 0.7f);
+                    float pulseRadius = 0.15f + eye.pulseIntensity * 0.25f;
+                    int pulseColor = modulateColorAlpha(eye.laserColor, eye.pulseIntensity * 0.8f);
 
-                    VectorRenderer.drawSphereWorld(
-                            eye.laserEnd,
-                            pulseRadius,
-                            pulseColor,
-                            8, 10,
-                            false,
-                            1,
-                            VectorRenderer.Transform.IDENTITY
-                    );
+                    VectorRenderer.drawSphereWorld(eye.laserEnd, pulseRadius, pulseColor, 12, 16,
+                            false, 1, VectorRenderer.Transform.IDENTITY);
                 }
             }
         }
     }
 
-    // Helper methods
+    // Animation and state management
+    private static void updateAnatomicalAnimation(OrbitalEyeInstance eye, float partialTick) {
+        // Update pulse animation
+        eye.pulseTimer += PULSE_SPEED * partialTick;
+        if (eye.pulseTimer > 1.0f) eye.pulseTimer -= 1.0f;
 
+        // Update laser pulse
+        if (eye.firing) {
+            float cyclePos = eye.pulseTimer;
+            if (cyclePos < LASER_PULSE_DURATION) {
+                float pulsePos = cyclePos / LASER_PULSE_DURATION;
+                eye.pulseIntensity = (float) (Math.sin(pulsePos * Math.PI) * Math.exp(-pulsePos * 2));
+            } else {
+                eye.pulseIntensity = 0.0f;
+            }
+            eye.isPulsing = eye.pulseIntensity > 0.1f;
+
+            // Pupil dilates when firing
+            eye.pupilSize = PUPIL_MIN_SIZE + (PUPIL_MAX_SIZE - PUPIL_MIN_SIZE) * (0.3f + eye.pulseIntensity * 0.6f);
+        } else {
+            eye.pulseIntensity = 0.0f;
+            eye.isPulsing = false;
+            eye.pupilSize = PUPIL_MIN_SIZE + (PUPIL_MAX_SIZE - PUPIL_MIN_SIZE) * 0.4f;
+        }
+
+        // Update blink animation
+        if (!eye.isBlinking) {
+            eye.blinkTimer += partialTick;
+            if (eye.blinkTimer > 60 + RAND.nextFloat() * 120) {
+                eye.isBlinking = true;
+                eye.blinkTimer = 0;
+                eye.blinkPhase = 0;
+            }
+        } else {
+            eye.blinkTimer += BLINK_SPEED * partialTick;
+            if (eye.blinkTimer < 1.0f) {
+                eye.blinkPhase = (float) Math.sin(eye.blinkTimer * Math.PI);
+            } else {
+                eye.isBlinking = false;
+                eye.blinkPhase = 0;
+                eye.blinkTimer = 0;
+            }
+        }
+
+        // Update saccade movement
+        eye.saccadeTimer += SACCADE_SPEED * partialTick;
+        if (eye.saccadeTimer > 1.0f) {
+            eye.saccadeTimer = 0;
+            if (eye.targetLookDirection != null) {
+                eye.currentLookDirection = eye.currentLookDirection.lerp(eye.targetLookDirection, 0.1f);
+            }
+        }
+
+        // Update bloodshot/fatigue effects
+        if (eye.firing) {
+            eye.fatigueLevel = Math.min(1.0f, eye.fatigueLevel + 0.01f * partialTick);
+            eye.bloodshotIntensity = Math.min(0.8f, eye.bloodshotIntensity + 0.02f * partialTick);
+        } else {
+            eye.fatigueLevel = Math.max(0.0f, eye.fatigueLevel - 0.005f * partialTick);
+            eye.bloodshotIntensity = Math.max(0.0f, eye.bloodshotIntensity - 0.01f * partialTick);
+        }
+    }
+
+    // Helper methods
     private static Entity getTargetEntity(Minecraft mc, OrbitalEyeData data) {
         Entity target = mc.level.getEntity(data.targetId);
         if (data.isEntity) {
             return (target instanceof LivingEntity || target instanceof ItemEntity) ? target : null;
         } else {
-            // For item-based effects, look for ItemEntity
             return target instanceof ItemEntity ? target : null;
         }
     }
@@ -305,76 +517,60 @@ public final class OrbitalEyeRenderer {
         if (target instanceof LivingEntity living) {
             y += living.getBbHeight() * 0.5;
         } else if (target instanceof ItemEntity) {
-            y += 0.3; // Slightly above item
+            y += 0.3;
         }
 
         return new Vec3(x, y, z);
     }
 
-    private static void updateEyeAnimation(OrbitalEyeInstance eye, float partialTick) {
-        // Update pulse animation
-        eye.pulseTimer += PULSE_SPEED * partialTick;
-        if (eye.pulseTimer > 1.0f) eye.pulseTimer -= 1.0f;
-
-        if (eye.firing) {
-            // Pulse intensity follows a sharp spike pattern for short laser pulses
-            float cyclePos = eye.pulseTimer;
-            if (cyclePos < LASER_PULSE_DURATION) {
-                float pulsePos = cyclePos / LASER_PULSE_DURATION;
-                // Sharp attack, quick decay
-                eye.pulseIntensity = (float)(Math.sin(pulsePos * Math.PI) * Math.exp(-pulsePos * 3));
-            } else {
-                eye.pulseIntensity = 0.0f;
-            }
-            eye.isPulsing = eye.pulseIntensity > 0.1f;
-        } else {
-            eye.pulseIntensity = 0.0f;
-            eye.isPulsing = false;
-        }
+    private static int determineLODLevel(double distance) {
+        if (distance < LOD_DISTANCE_HIGH) return 2;
+        else if (distance < LOD_DISTANCE_MED) return 1;
+        else return 0;
     }
 
-    private static int determineLODLevel(double distance) {
-        if (distance < LOD_DISTANCE_HIGH) return 2; // High detail
-        else if (distance < LOD_DISTANCE_MED) return 1; // Medium detail
-        else return 0; // Low detail
+    private static int getLODSegments(int lodLevel) {
+        switch (lodLevel) {
+            case 2:
+                return 20; // High detail
+            case 1:
+                return 16; // Medium detail
+            default:
+                return 12; // Low detail
+        }
     }
 
     private static Quaternionf calculateEyeOrientation(OrbitalEyeInstance eye, Vec3 eyePos, Vec3 cameraPos) {
         Vec3 lookDir;
-        if (eye.lookDirection != null && eye.lookDirection.length() > 1e-6) {
-            lookDir = eye.lookDirection.normalize();
+        if (eye.currentLookDirection != null && eye.currentLookDirection.length() > 1e-6) {
+            lookDir = eye.currentLookDirection.normalize();
         } else {
             lookDir = cameraPos.subtract(eyePos).normalize();
         }
 
         Vector3f forward = new Vector3f(0, 0, 1);
-        Vector3f target = new Vector3f((float)lookDir.x, (float)lookDir.y, (float)lookDir.z);
+        Vector3f target = new Vector3f((float) lookDir.x, (float) lookDir.y, (float) lookDir.z);
         return new Quaternionf().rotationTo(forward, target);
     }
 
-    private static float getEyeAlpha(OrbitalEyeInstance eye) {
-        int scleraAlpha = (eye.scleraColor >> 24) & 0xFF;
-        return scleraAlpha / 255.0f;
+    private static float getBlinkScale(OrbitalEyeInstance eye) {
+        return 1.0f - eye.blinkPhase * 0.7f;
     }
 
-    private static List<Vec3> getSphereForLOD(int lodLevel) {
-        switch (lodLevel) {
-            case 2: return HIGH_DETAIL_SPHERE;
-            case 1: return MED_DETAIL_SPHERE;
-            default: return LOW_DETAIL_SPHERE;
+    private static float getPulseScale(OrbitalEyeInstance eye) {
+        return eye.isPulsing ? 1.0f + eye.pulseIntensity * 0.15f : 1.0f;
+    }
+
+    private static Vec3 calculateLookOffset(OrbitalEyeInstance eye, Quaternionf orientation, float maxOffset) {
+        if (eye.currentLookDirection == null || eye.currentLookDirection.length() < 1e-6) {
+            return Vec3.ZERO;
         }
-    }
 
-    private static Vec3 calculatePupilOffset(OrbitalEyeInstance eye, Quaternionf orientation, float maxOffset) {
-        if (eye.lookDirection == null) return Vec3.ZERO;
-
-        // Project look direction onto eye surface
-        Vec3 lookDir = eye.lookDirection.normalize();
+        Vec3 lookDir = eye.currentLookDirection.normalize();
         Vec3 forward = getForwardVector(orientation);
 
-        // Calculate offset in eye's local space
         double dotProduct = lookDir.dot(forward);
-        if (Math.abs(dotProduct) > 0.9) return Vec3.ZERO; // Looking directly forward/backward
+        if (Math.abs(dotProduct) > 0.95) return Vec3.ZERO;
 
         Vec3 offset = lookDir.subtract(forward.scale(dotProduct)).normalize().scale(maxOffset);
         return offset;
@@ -386,86 +582,31 @@ public final class OrbitalEyeRenderer {
         return new Vec3(forward.x(), forward.y(), forward.z());
     }
 
-    private static Vec3 transformSphereVertex(Vec3 vertex, Vec3 center, float radius,
-                                              Quaternionf orientation, Vec3 cameraPos) {
-        // Scale vertex
-        Vec3 scaled = vertex.scale(radius);
+    private static Vec3 reflect(Vec3 incident, Vec3 normal) {
+        return incident.subtract(normal.scale(2.0 * incident.dot(normal)));
+    }
 
-        // Apply orientation
-        Vector3f vec = new Vector3f((float)scaled.x, (float)scaled.y, (float)scaled.z);
-        orientation.transform(vec);
+    private static int blendColors(int color1, int color2, float factor) {
+        factor = Math.max(0.0f, Math.min(1.0f, factor));
 
-        // Translate to world position and make relative to camera
-        Vec3 worldPos = center.add(vec.x(), vec.y(), vec.z());
-        return worldPos.subtract(cameraPos);
+        int a1 = (color1 >> 24) & 0xFF, r1 = (color1 >> 16) & 0xFF;
+        int g1 = (color1 >> 8) & 0xFF, b1 = color1 & 0xFF;
+
+        int a2 = (color2 >> 24) & 0xFF, r2 = (color2 >> 16) & 0xFF;
+        int g2 = (color2 >> 8) & 0xFF, b2 = color2 & 0xFF;
+
+        int a = (int) (a1 + (a2 - a1) * factor), r = (int) (r1 + (r2 - r1) * factor);
+        int g = (int) (g1 + (g2 - g1) * factor), b = (int) (b1 + (b2 - b1) * factor);
+
+        return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
     private static int modulateColorAlpha(int color, float intensity) {
-        int alpha = (int)(((color >> 24) & 0xFF) * intensity);
+        int alpha = (int) (((color >> 24) & 0xFF) * intensity);
         return (color & 0x00FFFFFF) | (alpha << 24);
     }
 
-    private static List<Vec3> generateSphereVertices(int latSegments, int lonSegments) {
-        List<Vec3> vertices = new ArrayList<>();
-
-        for (int lat = 0; lat < latSegments; lat++) {
-            double theta1 = Math.PI * lat / latSegments;
-            double theta2 = Math.PI * (lat + 1) / latSegments;
-
-            for (int lon = 0; lon < lonSegments; lon++) {
-                double phi1 = 2.0 * Math.PI * lon / lonSegments;
-                double phi2 = 2.0 * Math.PI * (lon + 1) / lonSegments;
-
-                // Generate two triangles for each quad
-                Vec3 v1 = sphericalToCartesian(theta1, phi1);
-                Vec3 v2 = sphericalToCartesian(theta1, phi2);
-                Vec3 v3 = sphericalToCartesian(theta2, phi1);
-                Vec3 v4 = sphericalToCartesian(theta2, phi2);
-
-                // First triangle
-                vertices.add(v1);
-                vertices.add(v3);
-                vertices.add(v2);
-
-                // Second triangle
-                vertices.add(v2);
-                vertices.add(v3);
-                vertices.add(v4);
-            }
-        }
-
-        return vertices;
-    }
-
-    private static Vec3 sphericalToCartesian(double theta, double phi) {
-        double x = Math.sin(theta) * Math.cos(phi);
-        double y = Math.cos(theta);
-        double z = Math.sin(theta) * Math.sin(phi);
-        return new Vec3(x, y, z);
-    }
-
-    private static float[] unpackColor(int color) {
-        float a = ((color >> 24) & 0xFF) / 255f;
-        float r = ((color >> 16) & 0xFF) / 255f;
-        float g = ((color >> 8) & 0xFF) / 255f;
-        float b = (color & 0xFF) / 255f;
-        return new float[]{r, g, b, a};
-    }
-
-    private static void addTriangle(BufferBuilder buffer, Matrix4f poseMatrix, Vec3 a, Vec3 b, Vec3 c, float[] rgba) {
-        buffer.vertex(poseMatrix, (float) a.x, (float) a.y, (float) a.z)
-                .color(rgba[0], rgba[1], rgba[2], rgba[3])
-                .endVertex();
-        buffer.vertex(poseMatrix, (float) b.x, (float) b.y, (float) b.z)
-                .color(rgba[0], rgba[1], rgba[2], rgba[3])
-                .endVertex();
-        buffer.vertex(poseMatrix, (float) c.x, (float) c.y, (float) c.z)
-                .color(rgba[0], rgba[1], rgba[2], rgba[3])
-                .endVertex();
-    }
-
     // Data classes
-
     private static final class OrbitalEyeData {
         final int targetId;
         final boolean isEntity;
@@ -481,23 +622,38 @@ public final class OrbitalEyeRenderer {
     }
 
     private static final class OrbitalEyeInstance {
+        // Basic properties
         Vec3 offset = Vec3.ZERO;
         float radius = 0.5f;
         int scleraColor = 0xFF222222;
         int pupilColor = 0xFFFFFFFF;
         int irisColor = 0xFF000000;
-        boolean firing = false;
-        boolean isBlinking = false;
-        float blinkPhase = 0.0f;
-        Vec3 laserEnd = null;
-        Vec3 lookDirection = null;
-        boolean isPulsing = false;
-        float pulseIntensity = 0.0f;
         int laserColor = 0xFFFF3333;
 
-        // Animation state
+        // State flags
+        boolean firing = false;
+        boolean isBlinking = false;
+        boolean isPulsing = false;
+
+        // Animation values
+        float blinkPhase = 0.0f;
+        float pulseIntensity = 0.0f;
+        float pupilSize = 0.25f;
+
+        // Direction vectors
+        Vec3 laserEnd = null;
+        Vec3 lookDirection = null;
+        Vec3 targetLookDirection = null;
+        Vec3 currentLookDirection = null;
+
+        // Animation timers
         float pulseTimer = 0.0f;
-        float rotationOffset = 0.0f;
+        float blinkTimer = 0.0f;
+        float saccadeTimer = 0.0f;
+
+        // Anatomical effects
+        float bloodshotIntensity = 0.0f;
+        float fatigueLevel = 0.0f;
     }
 
     private static final class RenderableEye {
@@ -515,4 +671,5 @@ public final class OrbitalEyeRenderer {
             this.lodLevel = lodLevel;
             this.distanceToCamera = distanceToCamera;
         }
-    }}
+    }
+}
