@@ -135,6 +135,13 @@ public class ModItems {
                     .rarity(Rarity.EPIC)
             ));
 
+    public static final RegistryObject<Item> FIRE_WAND = ITEMS.register("fire_wand",
+            () -> new FlameWandItem(new Item.Properties()
+                    .stacksTo(1)
+                    .durability(500) // Limited uses
+                    .rarity(Rarity.UNCOMMON)
+            ));
+
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);
     }

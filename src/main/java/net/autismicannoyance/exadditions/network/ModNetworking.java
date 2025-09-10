@@ -60,6 +60,11 @@ public final class ModNetworking {
         // Meteorite packet
         CHANNEL.registerMessage(id(), MeteoriteEffectPacket.class,
                 MeteoriteEffectPacket::encode, MeteoriteEffectPacket::decode, MeteoriteEffectPacket::handle);
+
+        // Flame jet packet - send from server to clients for flame wand effects
+        CHANNEL.registerMessage(id(), FlameJetPacket.class,
+                FlameJetPacket::encode, FlameJetPacket::decode, FlameJetPacket::handle);
+
     }
 
 
