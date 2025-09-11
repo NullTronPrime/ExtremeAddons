@@ -210,7 +210,7 @@ public class ElectricityRenderer {
             path.add(end);
             return path;
         }
-
+        //
         private void drawLayeredBolt(List<Vec3> path, int chainLevel) {
             if (path.size() < 2) return;
 
