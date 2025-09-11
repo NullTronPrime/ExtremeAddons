@@ -55,6 +55,7 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModItems.AI_HIJACKER.get());
                         pOutput.accept(ModItems.METEORITE_WAND.get());
                         pOutput.accept(ModItems.FIRE_WAND.get());
+                        pOutput.accept(ModItems.ELECTRICITY_WAND.get());
 
                     })
                     .build());

@@ -64,6 +64,9 @@ public final class ModNetworking {
         // Flame jet packet - send from server to clients for flame wand effects
         CHANNEL.registerMessage(id(), FlameJetPacket.class,
                 FlameJetPacket::encode, FlameJetPacket::decode, FlameJetPacket::handle);
+        //elec pac
+        CHANNEL.registerMessage(id(), ElectricityPacket.class,
+                ElectricityPacket::encode, ElectricityPacket::decode, ElectricityPacket::handle);
 
     }
 

@@ -142,6 +142,10 @@ public class ModItems {
                     .rarity(Rarity.UNCOMMON)
             ));
 
+    public static final RegistryObject<Item> ELECTRICITY_WAND = ITEMS.register("electric_wand",
+            () -> new ElectricWandItem(
+            ));
+
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);
     }
