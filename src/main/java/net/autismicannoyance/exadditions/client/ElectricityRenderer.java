@@ -13,6 +13,7 @@ import java.util.*;
  * Handles realistic electricity/lightning rendering with chaining effects
  * Enhanced version with proper storm cloud support for Forge 1.20.1
  * Updated to properly handle sequential chaining from cloud to mob to mob
+ * Optimized for better performance and reduced lag
  */
 public class ElectricityRenderer {
     private static final Map<Integer, ElectricChain> activeChains = new HashMap<>();
@@ -38,23 +39,21 @@ public class ElectricityRenderer {
     private static final int SECONDARY_BRANCH_COLOR = 0xFFFFFF88;  // Medium cream
     private static final int TERTIARY_BRANCH_COLOR = 0xFFFFDD44;   // Yellow-cream
 
-    // Realistic cloud colors - darker grays for storm clouds
-    private static final int CLOUD_DARK_CORE = 0xCC1A1A1A;     // Very dark gray core
-    private static final int CLOUD_DARK = 0xAA2D2D2D;          // Dark gray
-    private static final int CLOUD_MEDIUM_DARK = 0x88404040;   // Medium-dark gray
-    private static final int CLOUD_MEDIUM = 0x66535353;        // Medium gray
-    private static final int CLOUD_LIGHT = 0x44666666;         // Light gray edges
-    private static final int CLOUD_WISPY = 0x22808080;         // Very light wispy edges
+    // Optimized cloud colors - fewer layers for better performance
+    private static final int CLOUD_DARK_CORE = 0xCC1A1A1A;
+    private static final int CLOUD_DARK = 0xAA2D2D2D;
+    private static final int CLOUD_MEDIUM = 0x66535353;
+    private static final int CLOUD_LIGHT = 0x44666666;
 
     // Enhanced animation parameters
-    private static final int BOLT_LIFETIME = 15;
+    private static final int BOLT_LIFETIME = 12; // Reduced for faster clearing
     private static final int FLICKER_INTERVAL = 2;
     private static final float MAX_CHAIN_DISTANCE = 6.0f;
 
-    // Enhanced cloud parameters
-    private static final int CLOUD_LIFETIME = 200;
+    // Optimized cloud parameters - shorter lifetimes for less lag
+    private static final int CLOUD_LIFETIME = 160; // Reduced from 200
     private static final float CLOUD_SIZE = 3.5f;
-    private static final int CLOUD_RENDER_LIFETIME = 80;
+    private static final int CLOUD_RENDER_LIFETIME = 60; // Reduced from 80
 
     // Improved generation parameters for more natural lightning
     private static final float MIN_SEGMENT_LENGTH = 0.25f;
@@ -64,10 +63,10 @@ public class ElectricityRenderer {
     private static final int MIN_SEGMENTS = 5;
 
     // Multi-level branching parameters
-    private static final float PRIMARY_BRANCH_PROBABILITY = 0.45f;
-    private static final float SECONDARY_BRANCH_PROBABILITY = 0.35f;
-    private static final float TERTIARY_BRANCH_PROBABILITY = 0.25f;
-    private static final int MAX_BRANCH_DEPTH = 3;
+    private static final float PRIMARY_BRANCH_PROBABILITY = 0.35f; // Reduced for performance
+    private static final float SECONDARY_BRANCH_PROBABILITY = 0.25f; // Reduced for performance
+    private static final float TERTIARY_BRANCH_PROBABILITY = 0.15f; // Reduced for performance
+    private static final int MAX_BRANCH_DEPTH = 2; // Reduced from 3
 
     /**
      * Creates a chained electricity effect between entities
@@ -145,7 +144,7 @@ public class ElectricityRenderer {
     }
 
     /**
-     * Creates a storm cloud visual effect with realistic cloud rendering
+     * Creates a storm cloud visual effect with optimized cloud rendering
      */
     public static void createStormCloud(Level level, Entity player, int duration) {
         if (player == null) return;
@@ -189,7 +188,7 @@ public class ElectricityRenderer {
     }
 
     /**
-     * Enhanced storm cloud that looks like an actual storm cloud
+     * Optimized storm cloud that looks like an actual storm cloud but with better performance
      */
     private static class StormCloud {
         private Vec3 basePosition;
@@ -198,15 +197,13 @@ public class ElectricityRenderer {
         private final Entity player;
         private int nextCloudUpdate = 0;
         private final List<CloudLayer> cloudLayers;
-        private final List<CloudWisp> cloudWisps;
 
         public StormCloud(Vec3 position, int maxAge, Entity player) {
             this.basePosition = position;
             this.maxAge = maxAge;
             this.player = player;
             this.cloudLayers = new ArrayList<>();
-            this.cloudWisps = new ArrayList<>();
-            generateCloudStructure();
+            generateOptimizedCloudStructure();
         }
 
         public Vec3 getCurrentPosition() {
@@ -222,12 +219,12 @@ public class ElectricityRenderer {
             return basePosition;
         }
 
-        private void generateCloudStructure() {
-            Vec3 center = Vec3.ZERO;
+        private void generateOptimizedCloudStructure() {
+            // Simplified cloud structure - fewer layers for better performance
 
-            // Core layers - dense and dark
-            for (int i = 0; i < 8; i++) {
-                double angle = (2 * Math.PI * i) / 8;
+            // Core layers - dense and dark (reduced count)
+            for (int i = 0; i < 4; i++) {
+                double angle = (2 * Math.PI * i) / 4;
                 double radius = 0.8 + random.nextDouble() * 0.4;
                 Vec3 offset = new Vec3(
                         Math.cos(angle) * radius,
@@ -237,9 +234,9 @@ public class ElectricityRenderer {
                 cloudLayers.add(new CloudLayer(offset, 0.6f + random.nextFloat() * 0.3f, CLOUD_DARK_CORE, 0));
             }
 
-            // Inner layers - dark storm cloud color
-            for (int i = 0; i < 12; i++) {
-                double angle = (2 * Math.PI * i) / 12;
+            // Inner layers - dark storm cloud color (reduced count)
+            for (int i = 0; i < 6; i++) {
+                double angle = (2 * Math.PI * i) / 6;
                 double radius = 1.2 + random.nextDouble() * 0.6;
                 Vec3 offset = new Vec3(
                         Math.cos(angle) * radius,
@@ -249,35 +246,23 @@ public class ElectricityRenderer {
                 cloudLayers.add(new CloudLayer(offset, 0.5f + random.nextFloat() * 0.4f, CLOUD_DARK, 1));
             }
 
-            // Middle layers - medium darkness
-            for (int i = 0; i < 16; i++) {
-                double angle = (2 * Math.PI * i) / 16;
+            // Outer layers - medium (reduced count and simplified)
+            for (int i = 0; i < 8; i++) {
+                double angle = (2 * Math.PI * i) / 8;
                 double radius = 1.8 + random.nextDouble() * 0.8;
                 Vec3 offset = new Vec3(
                         Math.cos(angle) * radius,
                         (random.nextDouble() - 0.5) * 0.5,
                         Math.sin(angle) * radius
                 );
-                cloudLayers.add(new CloudLayer(offset, 0.4f + random.nextFloat() * 0.5f, CLOUD_MEDIUM_DARK, 2));
+                cloudLayers.add(new CloudLayer(offset, 0.4f + random.nextFloat() * 0.5f, CLOUD_MEDIUM, 2));
             }
 
-            // Outer layers - lighter but still stormy
-            for (int i = 0; i < 20; i++) {
-                double angle = (2 * Math.PI * i) / 20;
-                double radius = 2.4 + random.nextDouble() * 1.0;
-                Vec3 offset = new Vec3(
-                        Math.cos(angle) * radius,
-                        (random.nextDouble() - 0.5) * 0.6,
-                        Math.sin(angle) * radius
-                );
-                cloudLayers.add(new CloudLayer(offset, 0.3f + random.nextFloat() * 0.6f, CLOUD_MEDIUM, 3));
-            }
-
-            // Edge wisps - create cloud-like edges
-            for (int i = 0; i < 30; i++) {
+            // Edge wisps - simplified (reduced count)
+            for (int i = 0; i < 12; i++) {
                 double angle = random.nextDouble() * 2 * Math.PI;
-                double radius = 2.8 + random.nextDouble() * 1.5;
-                double height = (random.nextDouble() - 0.5) * 0.8;
+                double radius = 2.4 + random.nextDouble() * 1.0;
+                double height = (random.nextDouble() - 0.5) * 0.6;
 
                 Vec3 offset = new Vec3(
                         Math.cos(angle) * radius,
@@ -285,8 +270,7 @@ public class ElectricityRenderer {
                         Math.sin(angle) * radius
                 );
 
-                cloudWisps.add(new CloudWisp(offset, 0.2f + random.nextFloat() * 0.4f,
-                        random.nextFloat() < 0.3f ? CLOUD_LIGHT : CLOUD_WISPY));
+                cloudLayers.add(new CloudLayer(offset, 0.3f + random.nextFloat() * 0.4f, CLOUD_LIGHT, 3));
             }
         }
 
@@ -295,18 +279,19 @@ public class ElectricityRenderer {
 
             Vec3 currentPos = getCurrentPosition();
 
+            // Update less frequently for better performance
             if (age >= nextCloudUpdate) {
-                updateAndRenderCloud(currentPos);
-                nextCloudUpdate = age + 2; // Update every 2 ticks for smooth animation
+                updateAndRenderCloudOptimized(currentPos);
+                nextCloudUpdate = age + 4; // Update every 4 ticks instead of 2
             }
 
             return age >= maxAge || (player != null && (!player.isAlive() || player.isRemoved()));
         }
 
-        private void updateAndRenderCloud(Vec3 center) {
+        private void updateAndRenderCloudOptimized(Vec3 center) {
             double time = age * 0.01;
 
-            // Render cloud layers with layered depth
+            // Render cloud layers with optimized approach
             for (CloudLayer layer : cloudLayers) {
                 // Add gentle movement based on layer depth
                 double layerTime = time * (1.0 + layer.depth * 0.1);
@@ -318,26 +303,13 @@ public class ElectricityRenderer {
 
                 Vec3 layerPos = center.add(layer.offset).add(movement);
 
-                // Render as filled polygons for better cloud appearance
-                renderCloudBlob(layerPos, layer.size, layer.color);
-            }
-
-            // Render wispy edges
-            for (CloudWisp wisp : cloudWisps) {
-                double wispTime = time * 0.5;
-                Vec3 wispMovement = new Vec3(
-                        Math.sin(wispTime + wisp.offset.x * 0.1) * 0.08,
-                        Math.sin(wispTime * 1.4 + wisp.offset.y * 0.1) * 0.04,
-                        Math.cos(wispTime * 0.7 + wisp.offset.z * 0.1) * 0.08
-                );
-
-                Vec3 wispPos = center.add(wisp.offset).add(wispMovement);
-                VectorRenderer.drawSphereWorld(wispPos, wisp.size, wisp.color,
+                // Render as single sphere instead of multiple overlapping ones
+                VectorRenderer.drawSphereWorld(layerPos, layer.size, layer.color,
                         3, 4, true, CLOUD_RENDER_LIFETIME, null);
             }
 
-            // Occasional internal lightning flashes
-            if (random.nextFloat() < 0.03f) {
+            // Occasional internal lightning flashes (reduced frequency)
+            if (random.nextFloat() < 0.015f) {
                 Vec3 flashCenter = center.add(
                         (random.nextDouble() - 0.5) * 2.0,
                         (random.nextDouble() - 0.5) * 0.4,
@@ -346,27 +318,7 @@ public class ElectricityRenderer {
 
                 // Brief internal glow
                 VectorRenderer.drawSphereWorld(flashCenter, 0.3f, 0x66FFFF88,
-                        4, 5, true, 12, null);
-            }
-        }
-
-        private void renderCloudBlob(Vec3 center, float size, int color) {
-            // Create a more organic cloud shape using multiple overlapping spheres
-            int subdivisions = Math.max(3, (int)(size * 6));
-
-            for (int i = 0; i < subdivisions; i++) {
-                double angle = (2 * Math.PI * i) / subdivisions;
-                double radius = size * 0.6 * (0.8 + random.nextDouble() * 0.4);
-
-                Vec3 blobCenter = center.add(
-                        Math.cos(angle) * radius * 0.3,
-                        (random.nextDouble() - 0.5) * size * 0.2,
-                        Math.sin(angle) * radius * 0.3
-                );
-
-                float blobSize = size * (0.7f + random.nextFloat() * 0.6f);
-                VectorRenderer.drawSphereWorld(blobCenter, blobSize, color,
-                        4, 6, true, CLOUD_RENDER_LIFETIME, null);
+                        3, 4, true, 8, null); // Shorter lifetime
             }
         }
 
@@ -381,18 +333,6 @@ public class ElectricityRenderer {
                 this.size = size;
                 this.color = color;
                 this.depth = depth;
-            }
-        }
-
-        private static class CloudWisp {
-            final Vec3 offset;
-            final float size;
-            final int color;
-
-            CloudWisp(Vec3 offset, float size, int color) {
-                this.offset = offset;
-                this.size = size;
-                this.color = color;
             }
         }
     }
@@ -506,8 +446,8 @@ public class ElectricityRenderer {
             // Draw layered bolt for better visual effect
             drawLayeredBolt(mainPath, chainLevel);
 
-            // Generate multi-level branching system
-            generateMultiLevelBranches(mainPath, 0, chainLevel);
+            // Generate multi-level branching system (reduced complexity)
+            generateOptimizedBranches(mainPath, 0, chainLevel);
         }
 
         private List<Vec3> generateSmoothLightningPath(Vec3 start, Vec3 end) {
@@ -583,6 +523,9 @@ public class ElectricityRenderer {
         private void drawLayeredBolt(List<Vec3> path, int chainLevel) {
             if (path.size() < 2) return;
 
+            // Apply smoothing to the path for better visual quality
+            List<Vec3> smoothPath = applySmoothingFilter(path);
+
             // Adjust thickness and brightness based on chain level
             float thicknessMultiplier = 1.0f / (1.0f + chainLevel * 0.25f);
             float brightnessMultiplier = 1.0f / (1.0f + chainLevel * 0.15f);
@@ -591,31 +534,60 @@ public class ElectricityRenderer {
 
             // Outermost glow layer (very soft and wide)
             int softGlow = adjustColorBrightness(GLOW_COLOR, brightnessMultiplier * 0.4f);
-            VectorRenderer.drawPolylineWorld(path, softGlow,
+            VectorRenderer.drawPolylineWorld(smoothPath, softGlow,
                     GLOW_THICKNESS * thicknessMultiplier * 2.2f, false, BOLT_LIFETIME, null);
 
             // Outer glow layer
             int outerGlow = adjustColorBrightness(OUTER_COLOR, brightnessMultiplier * 0.7f);
-            VectorRenderer.drawPolylineWorld(path, outerGlow,
+            VectorRenderer.drawPolylineWorld(smoothPath, outerGlow,
                     GLOW_THICKNESS * thicknessMultiplier * 1.5f, false, BOLT_LIFETIME, null);
 
             // Middle layer
             int middleColor = adjustColorBrightness(MIDDLE_COLOR, brightnessMultiplier * 0.85f);
-            VectorRenderer.drawPolylineWorld(path, middleColor,
+            VectorRenderer.drawPolylineWorld(smoothPath, middleColor,
                     MAIN_BOLT_THICKNESS * thicknessMultiplier * 1.8f, false, BOLT_LIFETIME, null);
 
             // Inner layer
             int innerColor = adjustColorBrightness(INNER_COLOR, brightnessMultiplier * 0.95f);
-            VectorRenderer.drawPolylineWorld(path, innerColor,
+            VectorRenderer.drawPolylineWorld(smoothPath, innerColor,
                     MAIN_BOLT_THICKNESS * thicknessMultiplier * 1.2f, false, BOLT_LIFETIME, null);
 
             // Core layer (brightest, thinnest)
             int coreColor = adjustColorBrightness(CORE_COLOR, brightnessMultiplier);
-            VectorRenderer.drawPolylineWorld(path, coreColor,
+            VectorRenderer.drawPolylineWorld(smoothPath, coreColor,
                     MAIN_BOLT_THICKNESS * thicknessMultiplier * 0.6f, false, BOLT_LIFETIME, null);
         }
 
-        private void generateMultiLevelBranches(List<Vec3> mainPath, int depth, int chainLevel) {
+        /**
+         * Applies a smoothing filter to reduce sharp angles in lightning paths
+         */
+        private List<Vec3> applySmoothingFilter(List<Vec3> originalPath) {
+            if (originalPath.size() <= 2) {
+                return new ArrayList<>(originalPath);
+            }
+
+            List<Vec3> smoothedPath = new ArrayList<>();
+            smoothedPath.add(originalPath.get(0)); // Keep first point unchanged
+
+            // Apply moving average smoothing to intermediate points
+            for (int i = 1; i < originalPath.size() - 1; i++) {
+                Vec3 prev = originalPath.get(i - 1);
+                Vec3 current = originalPath.get(i);
+                Vec3 next = originalPath.get(i + 1);
+
+                // Weighted average: 20% previous, 60% current, 20% next
+                Vec3 smoothed = prev.scale(0.2)
+                        .add(current.scale(0.6))
+                        .add(next.scale(0.2));
+
+                smoothedPath.add(smoothed);
+            }
+
+            smoothedPath.add(originalPath.get(originalPath.size() - 1)); // Keep last point unchanged
+            return smoothedPath;
+        }
+
+        private void generateOptimizedBranches(List<Vec3> mainPath, int depth, int chainLevel) {
             if (depth >= MAX_BRANCH_DEPTH || mainPath.size() < 3) return;
 
             // Determine branch probability and color based on depth
@@ -629,15 +601,10 @@ public class ElectricityRenderer {
                     branchColor = PRIMARY_BRANCH_COLOR;
                     branchThickness = PRIMARY_BRANCH_THICKNESS;
                     break;
-                case 1: // Secondary branches
+                default: // Secondary branches
                     branchProbability = SECONDARY_BRANCH_PROBABILITY;
                     branchColor = SECONDARY_BRANCH_COLOR;
                     branchThickness = SECONDARY_BRANCH_THICKNESS;
-                    break;
-                default: // Tertiary branches
-                    branchProbability = TERTIARY_BRANCH_PROBABILITY;
-                    branchColor = TERTIARY_BRANCH_COLOR;
-                    branchThickness = TERTIARY_BRANCH_THICKNESS;
                     break;
             }
 
@@ -674,9 +641,9 @@ public class ElectricityRenderer {
                         // Draw branch with appropriate style for its level
                         drawBranchBolt(branchPath, depth, chainLevel, branchColor, branchThickness);
 
-                        // Recursive branching with decreasing probability
-                        if (depth < MAX_BRANCH_DEPTH - 1 && random.nextFloat() < 0.4f) {
-                            generateMultiLevelBranches(branchPath, depth + 1, chainLevel);
+                        // Recursive branching with reduced probability
+                        if (depth < MAX_BRANCH_DEPTH - 1 && random.nextFloat() < 0.3f) {
+                            generateOptimizedBranches(branchPath, depth + 1, chainLevel);
                         }
                     }
                 }
@@ -686,7 +653,7 @@ public class ElectricityRenderer {
         private void drawBranchBolt(List<Vec3> path, int depth, int chainLevel, int baseColor, float thickness) {
             if (path.size() < 2) return;
 
-            float depthFade = (float) Math.pow(0.85, depth);
+            float depthFade = (float) Math.pow(0.82, depth);
             float chainFade = 1.0f / (1.0f + chainLevel * 0.1f);
             float totalFade = depthFade * chainFade;
 
@@ -696,29 +663,59 @@ public class ElectricityRenderer {
             // Apply smoothing to branch paths as well
             List<Vec3> smoothPath = applySmoothingFilter(path);
 
-            // Enhanced layering for all branch levels with smooth paths
-            if (depth <= 1) {
-                // Primary and secondary branches get multiple layers
-                int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.6f);
-                VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
-                        branchThickness * 3.0f, false, BOLT_LIFETIME, null);
+            // Enhanced layering based on branch depth
+            switch (depth) {
+                case 0: // Primary branches - full layering
+                {
+                    int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.6f);
+                    VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
+                            branchThickness * 3.0f, false, BOLT_LIFETIME, null);
 
-                int branchOuter = adjustColorBrightness(OUTER_COLOR, totalFade * 0.8f);
-                VectorRenderer.drawPolylineWorld(smoothPath, branchOuter,
-                        branchThickness * 2.0f, false, BOLT_LIFETIME, null);
+                    int branchOuter = adjustColorBrightness(OUTER_COLOR, totalFade * 0.8f);
+                    VectorRenderer.drawPolylineWorld(smoothPath, branchOuter,
+                            branchThickness * 2.0f, false, BOLT_LIFETIME, null);
 
-                int branchMain = adjustColorBrightness(baseColor, totalFade);
-                VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
-                        branchThickness, false, BOLT_LIFETIME, null);
-            } else {
-                // Tertiary and quaternary branches get two layers but remain visible
-                int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.7f);
-                VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
-                        branchThickness * 2.2f, false, BOLT_LIFETIME, null);
+                    int branchMain = adjustColorBrightness(baseColor, totalFade);
+                    VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
+                            branchThickness, false, BOLT_LIFETIME, null);
+                }
+                break;
 
-                int branchMain = adjustColorBrightness(baseColor, totalFade * 0.95f);
-                VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
-                        branchThickness, false, BOLT_LIFETIME, null);
+                case 1: // Secondary branches - two layers
+                {
+                    int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.7f);
+                    VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
+                            branchThickness * 2.2f, false, BOLT_LIFETIME, null);
+
+                    int branchMain = adjustColorBrightness(baseColor, totalFade * 0.95f);
+                    VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
+                            branchThickness, false, BOLT_LIFETIME, null);
+                }
+                break;
+
+                case 2: // Tertiary branches - simplified
+                {
+                    int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.5f);
+                    VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
+                            branchThickness * 1.8f, false, BOLT_LIFETIME, null);
+
+                    int branchMain = adjustColorBrightness(baseColor, totalFade * 0.9f);
+                    VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
+                            branchThickness * 0.8f, false, BOLT_LIFETIME, null);
+                }
+                break;
+
+                default: // Quaternary branches - minimal but visible
+                {
+                    int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.4f);
+                    VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
+                            branchThickness * 1.5f, false, BOLT_LIFETIME, null);
+
+                    int branchMain = adjustColorBrightness(baseColor, totalFade * 0.8f);
+                    VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
+                            branchThickness * 0.6f, false, BOLT_LIFETIME, null);
+                }
+                break;
             }
         }
 
