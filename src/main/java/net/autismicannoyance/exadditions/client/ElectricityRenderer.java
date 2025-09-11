@@ -11,7 +11,7 @@ import java.util.*;
 
 /**
  * Handles realistic electricity/lightning rendering with chaining effects
- * Enhanced version with new color palette and storm cloud support
+ * Enhanced version with proper storm cloud support for Forge 1.20.1
  * Updated to properly handle sequential chaining from cloud to mob to mob
  */
 public class ElectricityRenderer {
@@ -26,14 +26,14 @@ public class ElectricityRenderer {
     private static final float TERTIARY_BRANCH_THICKNESS = 0.02f;
     private static final float GLOW_THICKNESS = 0.35f;
 
-    // Updated color scheme based on your palette (white to yellow gradient)
+    // Updated color scheme (white to yellow gradient)
     private static final int CORE_COLOR = 0xFFFFFFFF;          // Pure white core
     private static final int INNER_COLOR = 0xFFFFFFF0;         // Very light cream/white
     private static final int MIDDLE_COLOR = 0xFFFFFFDD;        // Light cream
     private static final int OUTER_COLOR = 0xFFFFFF88;         // Medium yellow-cream
     private static final int GLOW_COLOR = 0x44FFFF44;          // Soft yellow glow
 
-    // Branch colors (following the gradient)
+    // Branch colors
     private static final int PRIMARY_BRANCH_COLOR = 0xFFFFFFDD;    // Light cream
     private static final int SECONDARY_BRANCH_COLOR = 0xFFFFFF88;  // Medium cream
     private static final int TERTIARY_BRANCH_COLOR = 0xFFFFDD44;   // Yellow-cream
@@ -68,24 +68,18 @@ public class ElectricityRenderer {
 
     /**
      * Creates a chained electricity effect between entities
-     * Updated to handle sequential chaining properly and cloud sources
+     * Updated to handle cloud sources properly
      */
     public static void createElectricityChain(Level level, Entity source, List<Entity> targets, int duration) {
-        if (targets.isEmpty()) {
-            // If no targets, check if this is a storm cloud creation request
-            if (source != null && source.getId() < 0) {
-                // Negative ID indicates storm cloud
-                int cloudId = Math.abs(source.getId());
-                createStormCloud(level, source, duration);
-                return;
-            }
+        if (source == null && targets.isEmpty()) {
             return;
         }
 
-        int chainId = source.getId() + (int)(level.getGameTime() * 31);
-        List<LivingEntity> validTargets = new ArrayList<>();
+        // Generate unique chain ID
+        int chainId = (source != null ? source.getId() : 0) + (int)(level.getGameTime() * 31);
 
         // Validate targets and ensure they're LivingEntity
+        List<LivingEntity> validTargets = new ArrayList<>();
         for (Entity target : targets) {
             if (target instanceof LivingEntity living && target.isAlive()) {
                 validTargets.add(living);
@@ -93,18 +87,13 @@ public class ElectricityRenderer {
         }
 
         if (!validTargets.isEmpty()) {
-            ElectricChain chain;
-
-            if (source.getId() < 0) {
-                // Lightning from storm cloud
-                chain = new ElectricChain(null, validTargets, duration, true);
-            } else {
-                // Regular chain lightning
-                chain = new ElectricChain(source, validTargets, duration, false);
-            }
-
+            boolean isCloudLightning = source != null && source.getId() < 0;
+            ElectricChain chain = new ElectricChain(source, validTargets, duration, isCloudLightning);
             activeChains.put(chainId, chain);
             chain.generateBolts(level);
+
+            System.out.println("Created electricity chain: " + (isCloudLightning ? "cloud" : "normal") +
+                    " with " + validTargets.size() + " targets");
         }
     }
 
@@ -119,6 +108,8 @@ public class ElectricityRenderer {
 
         StormCloud cloud = new StormCloud(cloudPosition, duration);
         activeStormClouds.put(cloudId, cloud);
+
+        System.out.println("Created storm cloud visual at: " + cloudPosition);
     }
 
     public static void tick() {
@@ -275,7 +266,7 @@ public class ElectricityRenderer {
 
             if (fromCloud) {
                 drawCloudLightning(validTargets);
-            } else {
+            } else if (source != null) {
                 Vec3 sourcePos = getEntityCenter(source);
                 if (sourcePos != null) {
                     drawSequentialChain(sourcePos, validTargets);
@@ -287,11 +278,15 @@ public class ElectricityRenderer {
          * Draws lightning from storm cloud to targets
          */
         private void drawCloudLightning(List<LivingEntity> validTargets) {
-            // Find the cloud position (approximately above the first target)
-            Vec3 firstTargetPos = getEntityCenter(validTargets.get(0));
-            if (firstTargetPos == null) return;
-
-            Vec3 cloudPos = firstTargetPos.add(0, 4.0 + random.nextGaussian() * 0.5, 0);
+            // Get cloud position from source entity if available, otherwise calculate from first target
+            Vec3 cloudPos;
+            if (source != null) {
+                cloudPos = source.position();
+            } else {
+                Vec3 firstTargetPos = getEntityCenter(validTargets.get(0));
+                if (firstTargetPos == null) return;
+                cloudPos = firstTargetPos.add(0, 4.0 + random.nextGaussian() * 0.5, 0);
+            }
 
             // Draw lightning from cloud to first target, then chain between targets
             Vec3 previousPos = cloudPos;
@@ -302,7 +297,7 @@ public class ElectricityRenderer {
 
                 if (currentPos == null) continue;
 
-                // For cloud lightning, all connections are considered chain level 0 (primary)
+                // For cloud lightning, all connections are considered primary level
                 generateAdvancedLightningBolt(previousPos, currentPos, 0);
 
                 // Update previous position for next iteration

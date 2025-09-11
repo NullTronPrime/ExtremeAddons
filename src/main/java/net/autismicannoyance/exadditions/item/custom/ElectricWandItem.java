@@ -28,18 +28,18 @@ import java.util.*;
 
 /**
  * Electric Wand - Creates storm clouds above player that strike nearby mobs with chained lightning
- * Updated to spawn clouds 3-5 blocks above player and detect mobs within range
+ * Updated for Forge 1.20.1 with proper event handling and cloud persistence
  */
 public class ElectricWandItem extends Item {
 
     private static final double CLOUD_HEIGHT_MIN = 3.0;
     private static final double CLOUD_HEIGHT_MAX = 5.0;
-    private static final double MOB_DETECTION_RANGE = 6.0; // Range from cloud to detect mobs
-    private static final double CHAIN_RANGE = 5.0; // Range for chaining between mobs
+    private static final double MOB_DETECTION_RANGE = 6.0;
+    private static final double CHAIN_RANGE = 5.0;
     private static final int MAX_TARGETS = 8;
-    private static final int COOLDOWN_TICKS = 60; // Longer cooldown for cloud mode
-    private static final int EFFECT_DURATION = 100; // Longer duration for cloud effects
-    private static final int CLOUD_DURATION = 200; // How long clouds persist
+    private static final int COOLDOWN_TICKS = 60;
+    private static final int EFFECT_DURATION = 100;
+    private static final int CLOUD_DURATION = 200;
 
     private static final float BASE_DAMAGE = 6.0f;
     private static final float CHAIN_DAMAGE_REDUCTION = 0.8f;
@@ -66,6 +66,7 @@ public class ElectricWandItem extends Item {
 
         if (!level.isClientSide) {
             ServerLevel serverLevel = (ServerLevel) level;
+            System.out.println("Electric wand used by: " + player.getName().getString());
 
             // Create or refresh storm cloud above player
             createStormCloud(serverLevel, player, stack, hand);
@@ -80,7 +81,7 @@ public class ElectricWandItem extends Item {
             return InteractionResultHolder.success(stack);
         }
 
-        return InteractionResultHolder.fail(stack);
+        return InteractionResultHolder.success(stack);
     }
 
     /**
@@ -100,14 +101,32 @@ public class ElectricWandItem extends Item {
         StormCloud stormCloud = new StormCloud(level, player, cloudPosition, CLOUD_DURATION, stack, hand);
         activeStormClouds.put(playerId, stormCloud);
 
-        // Send packet to clients for visual cloud rendering
-        sendStormCloudPacket(level, player, cloudPosition, CLOUD_DURATION);
+        // Send packet to clients for initial visual cloud rendering
+        sendStormCloudCreatePacket(level, player, cloudPosition, CLOUD_DURATION);
+
+        System.out.println("Storm cloud created at: " + cloudPosition + " for player: " + player.getName().getString());
     }
 
     /**
-     * Tick method to be called from your mod's tick handler
+     * Send packet to create visual storm cloud
+     */
+    private void sendStormCloudCreatePacket(ServerLevel level, Player player, Vec3 cloudPosition, int duration) {
+        // Use negative player ID to indicate storm cloud creation
+        ElectricityPacket packet = new ElectricityPacket(-Math.abs(player.getId()), Collections.emptyList(), duration);
+
+        PacketDistributor.TargetPoint targetPoint = new PacketDistributor.TargetPoint(
+                player.getX(), player.getY(), player.getZ(), 64.0, level.dimension()
+        );
+
+        ModNetworking.CHANNEL.send(PacketDistributor.NEAR.with(() -> targetPoint), packet);
+    }
+
+    /**
+     * Tick method to be called from event handler
      */
     public static void tickStormClouds() {
+        if (activeStormClouds.isEmpty()) return;
+
         Iterator<Map.Entry<UUID, StormCloud>> iterator = activeStormClouds.entrySet().iterator();
 
         while (iterator.hasNext()) {
@@ -115,7 +134,7 @@ public class ElectricWandItem extends Item {
             StormCloud cloud = entry.getValue();
 
             if (cloud.tick()) {
-                iterator.remove(); // Remove expired clouds
+                iterator.remove();
             }
         }
     }
@@ -125,17 +144,6 @@ public class ElectricWandItem extends Item {
      */
     public static void clearAllStormClouds() {
         activeStormClouds.clear();
-    }
-
-    private void sendStormCloudPacket(ServerLevel level, Player player, Vec3 cloudPosition, int duration) {
-        // For now, we'll use empty targets list - the cloud will be rendered separately
-        ElectricityPacket packet = new ElectricityPacket(player.getId(), Collections.emptyList(), duration);
-
-        PacketDistributor.TargetPoint targetPoint = new PacketDistributor.TargetPoint(
-                player.getX(), player.getY(), player.getZ(), 64.0, level.dimension()
-        );
-
-        ModNetworking.CHANNEL.send(PacketDistributor.NEAR.with(() -> targetPoint), packet);
     }
 
     /**
@@ -151,8 +159,8 @@ public class ElectricWandItem extends Item {
         private final ItemStack wandStack;
         private final InteractionHand hand;
 
-        private static final int LIGHTNING_CHECK_INTERVAL = 20; // Check for targets every second
-        private static final int MIN_LIGHTNING_COOLDOWN = 40; // Minimum 2 seconds between strikes
+        private static final int LIGHTNING_CHECK_INTERVAL = 20;
+        private static final int MIN_LIGHTNING_COOLDOWN = 40;
 
         public StormCloud(ServerLevel level, Player player, Vec3 position, int maxAge, ItemStack wandStack, InteractionHand hand) {
             this.level = level;
@@ -170,7 +178,7 @@ public class ElectricWandItem extends Item {
             if (player.isAlive() && !player.isRemoved()) {
                 double cloudHeight = CLOUD_HEIGHT_MIN + level.random.nextDouble() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
                 position = player.position().add(
-                        level.random.nextGaussian() * 0.5, // Small horizontal drift
+                        level.random.nextGaussian() * 0.5,
                         cloudHeight,
                         level.random.nextGaussian() * 0.5
                 );
@@ -192,12 +200,12 @@ public class ElectricWandItem extends Item {
             List<LivingEntity> nearbyMobs = level.getEntitiesOfClass(LivingEntity.class, detectionBox,
                     entity -> entity != player && entity.isAlive() && !entity.isRemoved());
 
+            System.out.println("Found " + nearbyMobs.size() + " nearby mobs");
+
             if (!nearbyMobs.isEmpty()) {
-                // Find the closest mob as the initial target
                 LivingEntity closestMob = findClosestMob(nearbyMobs);
 
                 if (closestMob != null) {
-                    // Create chained lightning from cloud to mobs
                     List<LivingEntity> chainTargets = findChainTargets(closestMob, nearbyMobs);
 
                     if (!chainTargets.isEmpty()) {
@@ -230,14 +238,13 @@ public class ElectricWandItem extends Item {
             chainTargets.add(initialTarget);
             visited.add(initialTarget);
 
-            // Chain from the initial target to other nearby mobs
             LivingEntity currentTarget = initialTarget;
 
             while (chainTargets.size() < MAX_TARGETS) {
                 LivingEntity nextTarget = findNearestUnvisitedMob(currentTarget, allMobs, visited);
 
                 if (nextTarget == null || currentTarget.distanceTo(nextTarget) > CHAIN_RANGE) {
-                    break; // No more valid targets within range
+                    break;
                 }
 
                 chainTargets.add(nextTarget);
@@ -272,13 +279,15 @@ public class ElectricWandItem extends Item {
             // Damage wand
             wandStack.hurtAndBreak(1, player, (p) -> p.broadcastBreakEvent(hand));
 
-            // Send visual effect packet (we'll use the cloud position as the "source")
+            // Send visual effect packet
             sendLightningEffectPacket(targets);
 
             // Play lightning sound
             level.playSound(null, position.x, position.y, position.z,
                     SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS,
                     1.0f, 1.2f + level.random.nextFloat() * 0.6f);
+
+            System.out.println("Lightning strike triggered on " + targets.size() + " targets");
         }
 
         private void applyElectricEffects(List<LivingEntity> targets) {
@@ -304,8 +313,8 @@ public class ElectricWandItem extends Item {
                 targetIds.add(target.getId());
             }
 
-            // Create a temporary "cloud entity" ID for the source (using negative player ID)
-            ElectricityPacket packet = new ElectricityPacket(-player.getId(), targetIds, 60);
+            // Use negative player ID to indicate cloud source
+            ElectricityPacket packet = new ElectricityPacket(-Math.abs(player.getId()), targetIds, 60);
 
             PacketDistributor.TargetPoint targetPoint = new PacketDistributor.TargetPoint(
                     position.x, position.y, position.z, 64.0, level.dimension()
@@ -326,7 +335,7 @@ public class ElectricWandItem extends Item {
                 repair.getItem() == net.minecraft.world.item.Items.NETHERITE_INGOT;
     }
 
-    // ============== INTEGRATED EVENT HANDLING ==============
+    // ============== EVENT HANDLERS ==============
 
     /**
      * Server tick event handler - ticks all active storm clouds
