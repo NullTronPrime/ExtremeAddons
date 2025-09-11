@@ -45,8 +45,8 @@ public class ElectricityRenderer {
     private static final int CLOUD_MEDIUM = 0x66535353;
     private static final int CLOUD_LIGHT = 0x44666666;
 
-    // Enhanced animation parameters
-    private static final int BOLT_LIFETIME = 12; // Reduced for faster clearing
+    // Enhanced animation parameters - faster clearing
+    private static final int BOLT_LIFETIME = 8; // Reduced from 12 for faster clearing
     private static final int FLICKER_INTERVAL = 2;
     private static final float MAX_CHAIN_DISTANCE = 6.0f;
 
@@ -653,67 +653,68 @@ public class ElectricityRenderer {
         private void drawBranchBolt(List<Vec3> path, int depth, int chainLevel, int baseColor, float thickness) {
             if (path.size() < 2) return;
 
-            float depthFade = (float) Math.pow(0.82, depth);
-            float chainFade = 1.0f / (1.0f + chainLevel * 0.1f);
+            // Apply ultra-smoothing to all branch paths for perfect alignment
+            List<Vec3> ultraSmoothPath = applySmoothingFilter(path);
+
+            // Smoother scaling factors
+            float depthFade = (float) Math.pow(0.85, depth);
+            float chainFade = (float) Math.pow(0.92, chainLevel); // Smoother chain fade
             float totalFade = depthFade * chainFade;
 
-            // Branches get progressively thinner and dimmer but remain more visible
+            // Branches get progressively thinner with smoother scaling
             float branchThickness = thickness * totalFade;
 
-            // Apply smoothing to branch paths as well
-            List<Vec3> smoothPath = applySmoothingFilter(path);
-
-            // Enhanced layering based on branch depth
+            // Enhanced layering based on branch depth - all use ultra-smooth path
             switch (depth) {
-                case 0: // Primary branches - full layering
-                {
-                    int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.6f);
-                    VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
-                            branchThickness * 3.0f, false, BOLT_LIFETIME, null);
-
-                    int branchOuter = adjustColorBrightness(OUTER_COLOR, totalFade * 0.8f);
-                    VectorRenderer.drawPolylineWorld(smoothPath, branchOuter,
-                            branchThickness * 2.0f, false, BOLT_LIFETIME, null);
-
-                    int branchMain = adjustColorBrightness(baseColor, totalFade);
-                    VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
-                            branchThickness, false, BOLT_LIFETIME, null);
-                }
-                break;
-
-                case 1: // Secondary branches - two layers
+                case 0: // Primary branches - full layering with smooth scaling
                 {
                     int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.7f);
-                    VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
-                            branchThickness * 2.2f, false, BOLT_LIFETIME, null);
+                    VectorRenderer.drawPolylineWorld(ultraSmoothPath, branchGlow,
+                            branchThickness * 3.5f, false, BOLT_LIFETIME, null);
+
+                    int branchOuter = adjustColorBrightness(OUTER_COLOR, totalFade * 0.85f);
+                    VectorRenderer.drawPolylineWorld(ultraSmoothPath, branchOuter,
+                            branchThickness * 2.5f, false, BOLT_LIFETIME, null);
 
                     int branchMain = adjustColorBrightness(baseColor, totalFade * 0.95f);
-                    VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
-                            branchThickness, false, BOLT_LIFETIME, null);
+                    VectorRenderer.drawPolylineWorld(ultraSmoothPath, branchMain,
+                            branchThickness * 1.2f, false, BOLT_LIFETIME, null);
                 }
                 break;
 
-                case 2: // Tertiary branches - simplified
+                case 1: // Secondary branches - smooth two-layer
                 {
-                    int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.5f);
-                    VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
-                            branchThickness * 1.8f, false, BOLT_LIFETIME, null);
+                    int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.75f);
+                    VectorRenderer.drawPolylineWorld(ultraSmoothPath, branchGlow,
+                            branchThickness * 2.8f, false, BOLT_LIFETIME, null);
 
-                    int branchMain = adjustColorBrightness(baseColor, totalFade * 0.9f);
-                    VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
-                            branchThickness * 0.8f, false, BOLT_LIFETIME, null);
+                    int branchMain = adjustColorBrightness(baseColor, totalFade * 0.92f);
+                    VectorRenderer.drawPolylineWorld(ultraSmoothPath, branchMain,
+                            branchThickness * 1.1f, false, BOLT_LIFETIME, null);
                 }
                 break;
 
-                default: // Quaternary branches - minimal but visible
+                case 2: // Tertiary branches - refined
                 {
-                    int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.4f);
-                    VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
-                            branchThickness * 1.5f, false, BOLT_LIFETIME, null);
+                    int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.65f);
+                    VectorRenderer.drawPolylineWorld(ultraSmoothPath, branchGlow,
+                            branchThickness * 2.3f, false, BOLT_LIFETIME, null);
 
-                    int branchMain = adjustColorBrightness(baseColor, totalFade * 0.8f);
-                    VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
-                            branchThickness * 0.6f, false, BOLT_LIFETIME, null);
+                    int branchMain = adjustColorBrightness(baseColor, totalFade * 0.88f);
+                    VectorRenderer.drawPolylineWorld(ultraSmoothPath, branchMain,
+                            branchThickness * 0.9f, false, BOLT_LIFETIME, null);
+                }
+                break;
+
+                default: // Quaternary branches - subtle but visible
+                {
+                    int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.55f);
+                    VectorRenderer.drawPolylineWorld(ultraSmoothPath, branchGlow,
+                            branchThickness * 2.0f, false, BOLT_LIFETIME, null);
+
+                    int branchMain = adjustColorBrightness(baseColor, totalFade * 0.82f);
+                    VectorRenderer.drawPolylineWorld(ultraSmoothPath, branchMain,
+                            branchThickness * 0.75f, false, BOLT_LIFETIME, null);
                 }
                 break;
             }
