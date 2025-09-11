@@ -19,6 +19,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.DistExecutor;
@@ -48,12 +49,22 @@ public class ElectricWandItem extends Item {
     // Track active storm clouds per player
     private static final Map<UUID, StormCloud> activeStormClouds = new HashMap<>();
 
+    // Track if events are registered
+    private static boolean eventsRegistered = false;
+
     public ElectricWandItem() {
         super(new Properties()
                 .stacksTo(1)
                 .rarity(Rarity.EPIC)
                 .durability(100)
         );
+
+        // Register events only once
+        if (!eventsRegistered) {
+            MinecraftForge.EVENT_BUS.register(ElectricWandItem.class);
+            eventsRegistered = true;
+            System.out.println("ElectricWandItem: Event handlers registered");
+        }
     }
 
     @Override
@@ -119,6 +130,7 @@ public class ElectricWandItem extends Item {
         );
 
         ModNetworking.CHANNEL.send(PacketDistributor.NEAR.with(() -> targetPoint), packet);
+        System.out.println("Storm cloud creation packet sent to clients");
     }
 
     /**
@@ -194,8 +206,8 @@ public class ElectricWandItem extends Item {
         }
 
         private void checkForLightningStrike() {
-            // Find mobs within range of the cloud
-            AABB detectionBox = new AABB(position, position).inflate(MOB_DETECTION_RANGE);
+            // Find mobs within range of the player (not the cloud)
+            AABB detectionBox = new AABB(player.position(), player.position()).inflate(MOB_DETECTION_RANGE);
 
             List<LivingEntity> nearbyMobs = level.getEntitiesOfClass(LivingEntity.class, detectionBox,
                     entity -> entity != player && entity.isAlive() && !entity.isRemoved());
@@ -221,7 +233,7 @@ public class ElectricWandItem extends Item {
             double closestDistance = Double.MAX_VALUE;
 
             for (LivingEntity mob : mobs) {
-                double distance = position.distanceTo(mob.position().add(0, mob.getBbHeight() * 0.5, 0));
+                double distance = player.distanceTo(mob);
                 if (distance < closestDistance) {
                     closestDistance = distance;
                     closest = mob;
@@ -273,6 +285,8 @@ public class ElectricWandItem extends Item {
         }
 
         private void triggerLightningStrike(List<LivingEntity> targets) {
+            System.out.println("Triggering lightning strike on " + targets.size() + " targets");
+
             // Apply damage and effects
             applyElectricEffects(targets);
 
@@ -291,12 +305,13 @@ public class ElectricWandItem extends Item {
         }
 
         private void applyElectricEffects(List<LivingEntity> targets) {
-            DamageSource electricDamage = level.damageSources().mobAttack(player);
+            DamageSource electricDamage = level.damageSources().playerAttack(player);
 
             for (int i = 0; i < targets.size(); i++) {
                 LivingEntity target = targets.get(i);
                 float damage = BASE_DAMAGE * (float) Math.pow(CHAIN_DAMAGE_REDUCTION, i);
                 target.hurt(electricDamage, damage);
+                System.out.println("Applied " + damage + " damage to " + target.getName().getString());
 
                 if (target.isAlive()) {
                     // Knockback effect
@@ -321,6 +336,7 @@ public class ElectricWandItem extends Item {
             );
 
             ModNetworking.CHANNEL.send(PacketDistributor.NEAR.with(() -> targetPoint), packet);
+            System.out.println("Lightning effect packet sent to clients with " + targetIds.size() + " targets");
         }
     }
 

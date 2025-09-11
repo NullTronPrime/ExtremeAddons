@@ -2,14 +2,11 @@ package net.autismicannoyance.exadditions.network;
 
 import net.autismicannoyance.exadditions.client.ElectricityRenderer;
 import net.minecraft.client.Minecraft;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
@@ -17,15 +14,12 @@ import net.minecraftforge.network.NetworkEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
-import java.util.logging.Logger;
 
 /**
  * Network packet for synchronizing electricity effects between server and clients
  * Updated for Forge 1.20.1 with proper cloud lightning support
  */
 public class ElectricityPacket {
-    private static final Logger LOGGER = Logger.getLogger(ElectricityPacket.class.getName());
-
     private final int sourceEntityId;
     private final List<Integer> targetEntityIds;
     private final int duration;
@@ -95,7 +89,7 @@ public class ElectricityPacket {
             Level level = minecraft.level;
 
             if (level == null) {
-                LOGGER.info("ElectricityPacket: Level is null, cannot process");
+                System.out.println("ElectricityPacket: Level is null, cannot process");
                 return;
             }
 
@@ -106,7 +100,7 @@ public class ElectricityPacket {
                 // Normal player-to-mob lightning
                 sourceEntity = level.getEntity(packet.sourceEntityId);
                 if (sourceEntity == null) {
-                    LOGGER.info("ElectricityPacket: Source entity not found (ID: " + packet.sourceEntityId + ")");
+                    System.out.println("ElectricityPacket: Source entity not found (ID: " + packet.sourceEntityId + ")");
                     return;
                 }
             } else {
@@ -123,40 +117,38 @@ public class ElectricityPacket {
                 }
 
                 if (player != null) {
-                    // Create a temporary "cloud entity" for the renderer
-                    sourceEntity = new VirtualCloudEntity(level, player);
-                    LOGGER.info("ElectricityPacket: Created virtual cloud entity for player " + player.getName().getString());
+                    System.out.println("ElectricityPacket: Found player " + player.getName().getString() + " for cloud lightning");
+                    sourceEntity = player; // Use the actual player instead of virtual entity
                 } else {
-                    LOGGER.info("ElectricityPacket: Player not found for cloud lightning (ID: " + playerId + ")");
+                    System.out.println("ElectricityPacket: Player not found for cloud lightning (ID: " + playerId + ")");
+                    return;
                 }
             }
 
-            // Find all target entities
+            // Find all target entities - make sure they're LivingEntity
             List<Entity> targetEntities = new ArrayList<>();
             int foundTargets = 0;
             int missingTargets = 0;
 
             for (int targetId : packet.targetEntityIds) {
                 Entity target = level.getEntity(targetId);
-                if (target != null && target.isAlive() && !target.isRemoved()) {
+                if (target instanceof LivingEntity && target.isAlive() && !target.isRemoved()) {
                     targetEntities.add(target);
                     foundTargets++;
                 } else {
                     missingTargets++;
-                    LOGGER.info("ElectricityPacket: Target entity not found or invalid (ID: " + targetId + ")");
+                    System.out.println("ElectricityPacket: Target entity not found or invalid (ID: " + targetId + ")");
                 }
             }
 
-            LOGGER.info("ElectricityPacket: Processing " + (isCloudLightning ? "cloud" : "player") +
+            System.out.println("ElectricityPacket: Processing " + (isCloudLightning ? "cloud" : "player") +
                     " chain with " + foundTargets + " valid targets, " + missingTargets + " missing");
 
             // Handle cloud creation vs lightning strike
             if (targetEntities.isEmpty() && isCloudLightning) {
                 // This is a cloud creation packet (no targets)
-                if (sourceEntity != null) {
-                    ElectricityRenderer.createStormCloud(level, sourceEntity, packet.duration);
-                    LOGGER.info("ElectricityPacket: Created storm cloud visual effect");
-                }
+                ElectricityRenderer.createStormCloud(level, sourceEntity, packet.duration);
+                System.out.println("ElectricityPacket: Created storm cloud visual effect");
             } else if (!targetEntities.isEmpty()) {
                 // This is a lightning strike packet
                 ElectricityRenderer.createElectricityChain(
@@ -166,60 +158,16 @@ public class ElectricityPacket {
                         packet.duration
                 );
 
-                String sourceName = sourceEntity != null ? sourceEntity.getName().getString() : "cloud";
-                LOGGER.info("ElectricityPacket: Successfully created electricity chain from " +
+                String sourceName = sourceEntity != null ? sourceEntity.getName().getString() : "unknown";
+                System.out.println("ElectricityPacket: Successfully created electricity chain from " +
                         sourceName + " to " + targetEntities.size() + " targets");
             } else {
-                LOGGER.info("ElectricityPacket: No valid targets found, skipping effect");
+                System.out.println("ElectricityPacket: No valid targets found, skipping effect");
             }
 
         } catch (Exception e) {
-            LOGGER.severe("ElectricityPacket: Error handling packet: " + e.getMessage());
+            System.err.println("ElectricityPacket: Error handling packet: " + e.getMessage());
             e.printStackTrace();
-        }
-    }
-
-    /**
-     * Virtual entity class for representing storm clouds in rendering
-     */
-    private static class VirtualCloudEntity extends Entity {
-        private final Player player;
-
-        public VirtualCloudEntity(Level level, Player player) {
-            super(EntityType.MARKER, level);
-            this.player = player;
-        }
-
-        @Override
-        protected void defineSynchedData() {
-            // No synched data needed for virtual entity
-        }
-
-        @Override
-        public Vec3 position() {
-            // Position 4 blocks above the player
-            return player.position().add(0, 4.0, 0);
-        }
-
-        @Override
-        public Component getName() {
-            return Component.literal("Storm Cloud");
-        }
-
-        @Override
-        public int getId() {
-            // Use negative player ID to distinguish from real entities
-            return -Math.abs(player.getId());
-        }
-
-        @Override
-        protected void readAdditionalSaveData(CompoundTag tag) {
-            // Virtual entity doesn't need to save data
-        }
-
-        @Override
-        protected void addAdditionalSaveData(CompoundTag tag) {
-            // Virtual entity doesn't need to save data
         }
     }
 
