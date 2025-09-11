@@ -14,19 +14,20 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.*;
 import net.minecraftforge.network.PacketDistributor;
 
 import java.util.*;
 
 /**
  * Electric Wand - Creates chained lightning between nearby mobs
+ * Updated to use raycast targeting and sequential mob-to-mob chaining
  */
 public class ElectricWandItem extends Item {
 
-    private static final double DETECTION_RADIUS = 12.0;
-    private static final double CHAIN_RANGE = 6.0;
+    private static final double RAYCAST_DISTANCE = 20.0;
+    private static final double CHAIN_RANGE = 5.0; // Changed to 5 blocks as requested
     private static final int MAX_TARGETS = 8;
     private static final int COOLDOWN_TICKS = 40;
     private static final int EFFECT_DURATION = 60;
@@ -53,7 +54,7 @@ public class ElectricWandItem extends Item {
 
         if (!level.isClientSide) {
             ServerLevel serverLevel = (ServerLevel) level;
-            List<LivingEntity> targets = findChainableTargets(serverLevel, player);
+            List<LivingEntity> targets = findChainableTargetsWithRaycast(serverLevel, player);
 
             if (!targets.isEmpty()) {
                 player.getCooldowns().addCooldown(this, COOLDOWN_TICKS);
@@ -72,47 +73,139 @@ public class ElectricWandItem extends Item {
         return InteractionResultHolder.fail(stack);
     }
 
-    private List<LivingEntity> findChainableTargets(ServerLevel level, Player player) {
-        Vec3 playerPos = player.position();
+    /**
+     * New method that uses raycast to find the initial target, then chains from mob to mob
+     */
+    private List<LivingEntity> findChainableTargetsWithRaycast(ServerLevel level, Player player) {
+        // First, perform raycast to find the initial target
+        LivingEntity initialTarget = findInitialTargetWithRaycast(level, player);
 
-        // Use the Vec3-to-Vec3 AABB constructor then inflate
-        AABB searchBox = new AABB(playerPos, playerPos).inflate(DETECTION_RADIUS);
+        if (initialTarget == null) {
+            return Collections.emptyList();
+        }
 
-        List<LivingEntity> nearbyEntities = level.getEntitiesOfClass(LivingEntity.class, searchBox,
-                entity -> entity != player && entity.isAlive());
-
-        if (nearbyEntities.isEmpty()) return Collections.emptyList();
-
+        // Now chain from the initial target to other nearby mobs
         List<LivingEntity> chainedTargets = new ArrayList<>();
         Set<LivingEntity> visited = new HashSet<>();
 
-        LivingEntity startEntity = nearbyEntities.stream()
-                .min(Comparator.comparingDouble(a -> a.distanceToSqr(player)))
-                .orElse(null);
+        // Add the initial target
+        chainedTargets.add(initialTarget);
+        visited.add(initialTarget);
 
-        if (startEntity != null) {
-            Queue<LivingEntity> queue = new LinkedList<>();
-            queue.offer(startEntity);
-            visited.add(startEntity);
-            chainedTargets.add(startEntity);
+        // Find all potential chain targets in the area
+        Vec3 searchCenter = initialTarget.position();
+        AABB searchBox = new AABB(searchCenter, searchCenter).inflate(CHAIN_RANGE * 2); // Search in larger area
 
-            while (!queue.isEmpty() && chainedTargets.size() < MAX_TARGETS) {
-                LivingEntity current = queue.poll();
+        List<LivingEntity> potentialTargets = level.getEntitiesOfClass(LivingEntity.class, searchBox,
+                entity -> entity != player && entity != initialTarget && entity.isAlive());
 
-                for (LivingEntity candidate : nearbyEntities) {
-                    if (!visited.contains(candidate)
-                            && current.distanceTo(candidate) <= CHAIN_RANGE
-                            && chainedTargets.size() < MAX_TARGETS) {
+        // Chain from mob to mob
+        LivingEntity currentTarget = initialTarget;
 
-                        visited.add(candidate);
-                        chainedTargets.add(candidate);
-                        queue.offer(candidate);
-                    }
+        while (chainedTargets.size() < MAX_TARGETS && potentialTargets.size() > 0) {
+            LivingEntity nextTarget = findNearestUnvisitedTarget(currentTarget, potentialTargets, visited);
+
+            if (nextTarget == null || currentTarget.distanceTo(nextTarget) > CHAIN_RANGE) {
+                break; // No more valid targets within range
+            }
+
+            chainedTargets.add(nextTarget);
+            visited.add(nextTarget);
+            potentialTargets.remove(nextTarget); // Remove from potential targets
+            currentTarget = nextTarget; // Move to the next target in the chain
+        }
+
+        return chainedTargets;
+    }
+
+    /**
+     * Performs a raycast from the player's look direction to find the initial target
+     */
+    private LivingEntity findInitialTargetWithRaycast(ServerLevel level, Player player) {
+        // Get player's look direction
+        Vec3 eyePos = player.getEyePosition();
+        Vec3 lookVec = player.getLookAngle();
+        Vec3 endPos = eyePos.add(lookVec.scale(RAYCAST_DISTANCE));
+
+        // First check for block collision to limit our search
+        ClipContext clipContext = new ClipContext(
+                eyePos,
+                endPos,
+                ClipContext.Block.COLLIDER,
+                ClipContext.Fluid.NONE,
+                player
+        );
+
+        BlockHitResult blockHit = level.clip(clipContext);
+        if (blockHit.getType() != HitResult.Type.MISS) {
+            endPos = blockHit.getLocation(); // Limit raycast to where we hit a block
+        }
+
+        // Create a bounding box along the raycast path to find entities
+        AABB raycastBox = new AABB(eyePos, endPos).inflate(1.0); // 1 block tolerance
+
+        List<LivingEntity> entitiesInPath = level.getEntitiesOfClass(LivingEntity.class, raycastBox,
+                entity -> entity != player && entity.isAlive());
+
+        // Find the closest entity to the raycast line
+        LivingEntity closestEntity = null;
+        double closestDistance = Double.MAX_VALUE;
+
+        for (LivingEntity entity : entitiesInPath) {
+            // Calculate distance from entity to the raycast line
+            Vec3 entityPos = entity.position().add(0, entity.getBbHeight() * 0.5, 0); // Entity center
+            double distanceToRay = distancePointToLine(entityPos, eyePos, endPos);
+            double distanceToPlayer = player.distanceTo(entity);
+
+            // Prioritize entities closer to the raycast line and closer to the player
+            double score = distanceToRay + (distanceToPlayer * 0.1); // Weight distance to ray more heavily
+
+            if (score < closestDistance && distanceToRay <= 2.0) { // Must be within 2 blocks of raycast line
+                closestDistance = score;
+                closestEntity = entity;
+            }
+        }
+
+        return closestEntity;
+    }
+
+    /**
+     * Finds the nearest unvisited target to the current target
+     */
+    private LivingEntity findNearestUnvisitedTarget(LivingEntity currentTarget, List<LivingEntity> potentialTargets, Set<LivingEntity> visited) {
+        LivingEntity nearest = null;
+        double nearestDistance = Double.MAX_VALUE;
+
+        for (LivingEntity target : potentialTargets) {
+            if (!visited.contains(target)) {
+                double distance = currentTarget.distanceTo(target);
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearest = target;
                 }
             }
         }
 
-        return chainedTargets;
+        return nearest;
+    }
+
+    /**
+     * Calculates the distance from a point to a line segment
+     */
+    private double distancePointToLine(Vec3 point, Vec3 lineStart, Vec3 lineEnd) {
+        Vec3 lineVec = lineEnd.subtract(lineStart);
+        Vec3 pointVec = point.subtract(lineStart);
+
+        double lineLength = lineVec.length();
+        if (lineLength == 0) {
+            return point.distanceTo(lineStart);
+        }
+
+        // Project point onto line
+        double t = Math.max(0, Math.min(1, pointVec.dot(lineVec) / (lineLength * lineLength)));
+        Vec3 projection = lineStart.add(lineVec.scale(t));
+
+        return point.distanceTo(projection);
     }
 
     private void applyElectricEffects(ServerLevel level, Player player, List<LivingEntity> targets) {

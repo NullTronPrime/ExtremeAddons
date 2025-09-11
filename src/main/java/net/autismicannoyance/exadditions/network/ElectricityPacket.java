@@ -16,6 +16,7 @@ import java.util.function.Supplier;
 /**
  * Network packet for synchronizing electricity effects between server and clients
  * Sent from server to clients when an electric wand is used
+ * Updated with better error handling and debugging
  */
 public class ElectricityPacket {
     private final int sourceEntityId;
@@ -79,39 +80,62 @@ public class ElectricityPacket {
 
     /**
      * Client-side handling of the electricity packet
+     * Updated with better validation and debugging
      */
     private static void handleClientSide(ElectricityPacket packet) {
-        Minecraft minecraft = Minecraft.getInstance();
-        Level level = minecraft.level;
+        try {
+            Minecraft minecraft = Minecraft.getInstance();
+            Level level = minecraft.level;
 
-        if (level == null) {
-            return;
-        }
-
-        // Find the source entity
-        Entity sourceEntity = level.getEntity(packet.sourceEntityId);
-        if (sourceEntity == null) {
-            return;
-        }
-
-        // Find all target entities
-        List<Entity> targetEntities = new ArrayList<>();
-        for (int targetId : packet.targetEntityIds) {
-            Entity target = level.getEntity(targetId);
-            if (target != null) {
-                targetEntities.add(target);
+            if (level == null) {
+                System.out.println("ElectricityPacket: Level is null, cannot process");
+                return;
             }
-        }
 
-        // Only proceed if we have at least one valid target
-        if (!targetEntities.isEmpty()) {
-            // Create the electricity chain effect
-            ElectricityRenderer.createElectricityChain(
-                    level,
-                    sourceEntity,
-                    targetEntities,
-                    packet.duration
-            );
+            // Find the source entity
+            Entity sourceEntity = level.getEntity(packet.sourceEntityId);
+            if (sourceEntity == null) {
+                System.out.println("ElectricityPacket: Source entity not found (ID: " + packet.sourceEntityId + ")");
+                return;
+            }
+
+            // Find all target entities
+            List<Entity> targetEntities = new ArrayList<>();
+            int foundTargets = 0;
+            int missingTargets = 0;
+
+            for (int targetId : packet.targetEntityIds) {
+                Entity target = level.getEntity(targetId);
+                if (target != null && target.isAlive() && !target.isRemoved()) {
+                    targetEntities.add(target);
+                    foundTargets++;
+                } else {
+                    missingTargets++;
+                    System.out.println("ElectricityPacket: Target entity not found or invalid (ID: " + targetId + ")");
+                }
+            }
+
+            System.out.println("ElectricityPacket: Processing chain with " + foundTargets + " valid targets, " + missingTargets + " missing");
+
+            // Only proceed if we have at least one valid target
+            if (!targetEntities.isEmpty()) {
+                // Create the electricity chain effect
+                ElectricityRenderer.createElectricityChain(
+                        level,
+                        sourceEntity,
+                        targetEntities,
+                        packet.duration
+                );
+
+                System.out.println("ElectricityPacket: Successfully created electricity chain from " +
+                        sourceEntity.getName().getString() + " to " + targetEntities.size() + " targets");
+            } else {
+                System.out.println("ElectricityPacket: No valid targets found, skipping effect");
+            }
+
+        } catch (Exception e) {
+            System.err.println("ElectricityPacket: Error handling packet: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 

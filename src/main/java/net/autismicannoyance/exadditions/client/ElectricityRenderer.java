@@ -12,6 +12,7 @@ import java.util.*;
 /**
  * Handles realistic electricity/lightning rendering with chaining effects
  * Enhanced version with authentic white/yellow lightning and multi-level branching
+ * Updated to properly handle sequential chaining from mob to mob
  */
 public class ElectricityRenderer {
     private static final Map<Integer, ElectricChain> activeChains = new HashMap<>();
@@ -56,6 +57,7 @@ public class ElectricityRenderer {
 
     /**
      * Creates a chained electricity effect between entities
+     * Updated to handle sequential chaining properly
      */
     public static void createElectricityChain(Level level, Entity source, List<Entity> targets, int duration) {
         if (targets.isEmpty()) return;
@@ -63,9 +65,9 @@ public class ElectricityRenderer {
         int chainId = source.getId() + (int)(level.getGameTime() * 31);
         List<LivingEntity> validTargets = new ArrayList<>();
 
+        // Validate targets and ensure they're LivingEntity
         for (Entity target : targets) {
-            if (target instanceof LivingEntity living &&
-                    source.distanceTo(target) <= MAX_CHAIN_DISTANCE) {
+            if (target instanceof LivingEntity living && target.isAlive()) {
                 validTargets.add(living);
             }
         }
@@ -73,6 +75,7 @@ public class ElectricityRenderer {
         if (!validTargets.isEmpty()) {
             ElectricChain chain = new ElectricChain(source, validTargets, duration);
             activeChains.put(chainId, chain);
+            // Force immediate generation to avoid timing issues
             chain.generateBolts(level);
         }
     }
@@ -118,35 +121,51 @@ public class ElectricityRenderer {
         }
 
         public void generateBolts(Level level) {
-            Vec3 sourcePos = getEntityCenter(source);
-
-            // Main bolts from source to each target
+            // Validate all entities still exist and are alive
+            List<LivingEntity> validTargets = new ArrayList<>();
             for (LivingEntity target : targets) {
-                if (!target.isAlive()) continue;
-
-                Vec3 targetPos = getEntityCenter(target);
-                generateAdvancedLightningBolt(sourcePos, targetPos, 0);
+                if (target != null && target.isAlive() && !target.isRemoved()) {
+                    validTargets.add(target);
+                }
             }
 
-            // Chain bolts between targets
-            for (int i = 0; i < targets.size(); i++) {
-                for (int j = i + 1; j < targets.size(); j++) {
-                    LivingEntity target1 = targets.get(i);
-                    LivingEntity target2 = targets.get(j);
+            if (validTargets.isEmpty()) return;
 
-                    if (!target1.isAlive() || !target2.isAlive()) continue;
+            Vec3 sourcePos = getEntityCenter(source);
+            if (sourcePos == null) return;
 
-                    if (target1.distanceTo(target2) <= MAX_CHAIN_DISTANCE) {
-                        Vec3 pos1 = getEntityCenter(target1);
-                        Vec3 pos2 = getEntityCenter(target2);
-                        // Chain bolts are slightly dimmer and thinner
-                        generateAdvancedLightningBolt(pos1, pos2, 1);
-                    }
-                }
+            // Draw sequential chain connections
+            drawSequentialChain(sourcePos, validTargets);
+        }
+
+        /**
+         * Draws the sequential chain from player -> first mob -> second mob -> etc.
+         */
+        private void drawSequentialChain(Vec3 sourcePos, List<LivingEntity> validTargets) {
+            Vec3 previousPos = sourcePos;
+
+            for (int i = 0; i < validTargets.size(); i++) {
+                LivingEntity currentTarget = validTargets.get(i);
+                Vec3 currentPos = getEntityCenter(currentTarget);
+
+                if (currentPos == null) continue;
+
+                // Draw connection from previous position to current target
+                // First connection is from player (chainLevel = 0)
+                // Subsequent connections are between mobs (chainLevel = 1)
+                int chainLevel = (i == 0) ? 0 : 1;
+
+                generateAdvancedLightningBolt(previousPos, currentPos, chainLevel);
+
+                // Update previous position for next iteration
+                previousPos = currentPos;
             }
         }
 
         private Vec3 getEntityCenter(Entity entity) {
+            if (entity == null || entity.isRemoved()) {
+                return null;
+            }
             return entity.position().add(0, entity.getBbHeight() * 0.5, 0);
         }
 
@@ -339,26 +358,34 @@ public class ElectricityRenderer {
         private void drawBranchBolt(List<Vec3> path, int depth, int chainLevel, int baseColor, float thickness) {
             if (path.size() < 2) return;
 
-            float depthFade = (float) Math.pow(0.8, depth);
-            float chainFade = 1.0f / (1.0f + chainLevel * 0.15f);
+            float depthFade = (float) Math.pow(0.85, depth); // Less aggressive fading
+            float chainFade = 1.0f / (1.0f + chainLevel * 0.1f); // Less chain fading
             float totalFade = depthFade * chainFade;
 
-            // Branches get progressively thinner and dimmer
+            // Branches get progressively thinner and dimmer but remain more visible
             float branchThickness = thickness * totalFade;
 
-            // Draw fewer layers for branches to maintain performance while keeping them visible
-            if (depth == 0) {
-                // Primary branches get two layers
-                int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.5f);
+            // Enhanced layering for all branch levels
+            if (depth <= 1) {
+                // Primary and secondary branches get multiple layers
+                int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.6f);
                 VectorRenderer.drawPolylineWorld(path, branchGlow,
-                        branchThickness * 2.5f, false, BOLT_LIFETIME, null);
+                        branchThickness * 3.0f, false, BOLT_LIFETIME, null); // Increased glow
+
+                int branchOuter = adjustColorBrightness(OUTER_COLOR, totalFade * 0.8f);
+                VectorRenderer.drawPolylineWorld(path, branchOuter,
+                        branchThickness * 2.0f, false, BOLT_LIFETIME, null);
 
                 int branchMain = adjustColorBrightness(baseColor, totalFade);
                 VectorRenderer.drawPolylineWorld(path, branchMain,
                         branchThickness, false, BOLT_LIFETIME, null);
             } else {
-                // Secondary and tertiary branches get single layer but remain visible
-                int branchMain = adjustColorBrightness(baseColor, totalFade * 0.9f);
+                // Tertiary and quaternary branches get two layers but remain visible
+                int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.7f);
+                VectorRenderer.drawPolylineWorld(path, branchGlow,
+                        branchThickness * 2.2f, false, BOLT_LIFETIME, null);
+
+                int branchMain = adjustColorBrightness(baseColor, totalFade * 0.95f);
                 VectorRenderer.drawPolylineWorld(path, branchMain,
                         branchThickness, false, BOLT_LIFETIME, null);
             }
