@@ -11,11 +11,12 @@ import java.util.*;
 
 /**
  * Handles realistic electricity/lightning rendering with chaining effects
- * Enhanced version with authentic white/yellow lightning and multi-level branching
- * Updated to properly handle sequential chaining from mob to mob
+ * Enhanced version with new color palette and storm cloud support
+ * Updated to properly handle sequential chaining from cloud to mob to mob
  */
 public class ElectricityRenderer {
     private static final Map<Integer, ElectricChain> activeChains = new HashMap<>();
+    private static final Map<Integer, StormCloud> activeStormClouds = new HashMap<>();
     private static final RandomSource random = RandomSource.create();
 
     // Enhanced electricity visual parameters
@@ -25,22 +26,32 @@ public class ElectricityRenderer {
     private static final float TERTIARY_BRANCH_THICKNESS = 0.02f;
     private static final float GLOW_THICKNESS = 0.35f;
 
-    // Realistic white/yellow lightning color scheme
-    private static final int CORE_COLOR = 0xFFFFFFF0;          // Pure white with slight yellow tint
-    private static final int INNER_COLOR = 0xFFFFFFDD;         // Bright warm white
-    private static final int MIDDLE_COLOR = 0xFFFFFF88;        // Light yellow-white
-    private static final int OUTER_COLOR = 0xFFFFDD44;         // Soft yellow glow
-    private static final int GLOW_COLOR = 0x44FFEE88;          // Very soft yellow glow
+    // Updated color scheme based on your palette (white to yellow gradient)
+    private static final int CORE_COLOR = 0xFFFFFFFF;          // Pure white core
+    private static final int INNER_COLOR = 0xFFFFFFF0;         // Very light cream/white
+    private static final int MIDDLE_COLOR = 0xFFFFFFDD;        // Light cream
+    private static final int OUTER_COLOR = 0xFFFFFF88;         // Medium yellow-cream
+    private static final int GLOW_COLOR = 0x44FFFF44;          // Soft yellow glow
 
-    // Branch colors (dimmer versions)
-    private static final int PRIMARY_BRANCH_COLOR = 0xFFFFFFCC;    // Slightly dimmer white
-    private static final int SECONDARY_BRANCH_COLOR = 0xFFFFDD99;  // Warm white-yellow
-    private static final int TERTIARY_BRANCH_COLOR = 0xFFDDDD66;   // Dimmer yellow-white
+    // Branch colors (following the gradient)
+    private static final int PRIMARY_BRANCH_COLOR = 0xFFFFFFDD;    // Light cream
+    private static final int SECONDARY_BRANCH_COLOR = 0xFFFFFF88;  // Medium cream
+    private static final int TERTIARY_BRANCH_COLOR = 0xFFFFDD44;   // Yellow-cream
+
+    // Cloud colors
+    private static final int CLOUD_DARK = 0xFF333333;          // Dark gray
+    private static final int CLOUD_MEDIUM = 0xFF555555;        // Medium gray
+    private static final int CLOUD_LIGHT = 0xFF777777;         // Light gray
+    private static final int CLOUD_HIGHLIGHT = 0xFFAAAAAA;     // Very light gray
 
     // Enhanced animation parameters
     private static final int BOLT_LIFETIME = 15;
     private static final int FLICKER_INTERVAL = 2;
     private static final float MAX_CHAIN_DISTANCE = 6.0f;
+
+    // Cloud parameters
+    private static final int CLOUD_LIFETIME = 200;
+    private static final float CLOUD_SIZE = 2.5f;
 
     // Improved generation parameters for more natural lightning
     private static final float MIN_SEGMENT_LENGTH = 0.25f;
@@ -50,17 +61,26 @@ public class ElectricityRenderer {
     private static final int MIN_SEGMENTS = 5;
 
     // Multi-level branching parameters
-    private static final float PRIMARY_BRANCH_PROBABILITY = 0.45f;    // Higher chance for main branches
-    private static final float SECONDARY_BRANCH_PROBABILITY = 0.35f;  // Medium chance for sub-branches
-    private static final float TERTIARY_BRANCH_PROBABILITY = 0.25f;   // Lower chance for minor branches
-    private static final int MAX_BRANCH_DEPTH = 3;                    // Three levels: primary, secondary, tertiary
+    private static final float PRIMARY_BRANCH_PROBABILITY = 0.45f;
+    private static final float SECONDARY_BRANCH_PROBABILITY = 0.35f;
+    private static final float TERTIARY_BRANCH_PROBABILITY = 0.25f;
+    private static final int MAX_BRANCH_DEPTH = 3;
 
     /**
      * Creates a chained electricity effect between entities
-     * Updated to handle sequential chaining properly
+     * Updated to handle sequential chaining properly and cloud sources
      */
     public static void createElectricityChain(Level level, Entity source, List<Entity> targets, int duration) {
-        if (targets.isEmpty()) return;
+        if (targets.isEmpty()) {
+            // If no targets, check if this is a storm cloud creation request
+            if (source != null && source.getId() < 0) {
+                // Negative ID indicates storm cloud
+                int cloudId = Math.abs(source.getId());
+                createStormCloud(level, source, duration);
+                return;
+            }
+            return;
+        }
 
         int chainId = source.getId() + (int)(level.getGameTime() * 31);
         List<LivingEntity> validTargets = new ArrayList<>();
@@ -73,27 +93,147 @@ public class ElectricityRenderer {
         }
 
         if (!validTargets.isEmpty()) {
-            ElectricChain chain = new ElectricChain(source, validTargets, duration);
+            ElectricChain chain;
+
+            if (source.getId() < 0) {
+                // Lightning from storm cloud
+                chain = new ElectricChain(null, validTargets, duration, true);
+            } else {
+                // Regular chain lightning
+                chain = new ElectricChain(source, validTargets, duration, false);
+            }
+
             activeChains.put(chainId, chain);
-            // Force immediate generation to avoid timing issues
             chain.generateBolts(level);
         }
     }
 
+    /**
+     * Creates a storm cloud visual effect
+     */
+    public static void createStormCloud(Level level, Entity player, int duration) {
+        if (player == null) return;
+
+        Vec3 cloudPosition = player.position().add(0, 4.0, 0);
+        int cloudId = Math.abs(player.getId());
+
+        StormCloud cloud = new StormCloud(cloudPosition, duration);
+        activeStormClouds.put(cloudId, cloud);
+    }
+
     public static void tick() {
-        Iterator<Map.Entry<Integer, ElectricChain>> iterator = activeChains.entrySet().iterator();
-        while (iterator.hasNext()) {
-            Map.Entry<Integer, ElectricChain> entry = iterator.next();
+        // Tick lightning chains
+        Iterator<Map.Entry<Integer, ElectricChain>> chainIterator = activeChains.entrySet().iterator();
+        while (chainIterator.hasNext()) {
+            Map.Entry<Integer, ElectricChain> entry = chainIterator.next();
             ElectricChain chain = entry.getValue();
 
             if (chain.tick()) {
-                iterator.remove();
+                chainIterator.remove();
+            }
+        }
+
+        // Tick storm clouds
+        Iterator<Map.Entry<Integer, StormCloud>> cloudIterator = activeStormClouds.entrySet().iterator();
+        while (cloudIterator.hasNext()) {
+            Map.Entry<Integer, StormCloud> entry = cloudIterator.next();
+            StormCloud cloud = entry.getValue();
+
+            if (cloud.tick()) {
+                cloudIterator.remove();
             }
         }
     }
 
     public static void clearAll() {
         activeChains.clear();
+        activeStormClouds.clear();
+    }
+
+    /**
+     * Storm cloud visual effect that hovers above the player
+     */
+    private static class StormCloud {
+        private Vec3 position;
+        private int age = 0;
+        private final int maxAge;
+        private int nextFlicker = 0;
+
+        public StormCloud(Vec3 position, int maxAge) {
+            this.position = position;
+            this.maxAge = maxAge;
+        }
+
+        public boolean tick() {
+            age++;
+
+            // Gentle floating motion
+            double time = age * 0.05;
+            Vec3 drift = new Vec3(
+                    Math.sin(time) * 0.1,
+                    Math.sin(time * 1.3) * 0.05,
+                    Math.cos(time * 0.8) * 0.1
+            );
+
+            Vec3 currentPos = position.add(drift);
+
+            // Flicker cloud rendering
+            if (age >= nextFlicker) {
+                renderCloud(currentPos);
+                nextFlicker = age + 5 + random.nextInt(5); // Slower flicker for clouds
+            }
+
+            return age >= maxAge;
+        }
+
+        private void renderCloud(Vec3 center) {
+            // Create multiple cloud layers for a more realistic look
+            float baseSize = CLOUD_SIZE;
+            int segments = 8;
+
+            // Generate cloud particles/shapes
+            for (int layer = 0; layer < 3; layer++) {
+                float layerSize = baseSize * (1.2f - layer * 0.2f);
+                int layerColor;
+
+                switch (layer) {
+                    case 0: layerColor = CLOUD_DARK; break;
+                    case 1: layerColor = CLOUD_MEDIUM; break;
+                    default: layerColor = CLOUD_LIGHT; break;
+                }
+
+                // Create cloud segments around the center
+                for (int i = 0; i < segments; i++) {
+                    double angle = (2 * Math.PI * i) / segments;
+                    double radius = layerSize * (0.8 + random.nextDouble() * 0.4);
+
+                    Vec3 offset = new Vec3(
+                            Math.cos(angle) * radius,
+                            (random.nextDouble() - 0.5) * 0.3,
+                            Math.sin(angle) * radius
+                    );
+
+                    Vec3 cloudPoint = center.add(offset);
+                    float thickness = 0.4f + random.nextFloat() * 0.3f;
+
+                    // Draw cloud "puff" as a small sphere
+                    VectorRenderer.drawSphereWorld(cloudPoint, thickness, layerColor,
+                            6, 8, true, BOLT_LIFETIME, null);
+                }
+            }
+
+            // Add occasional lightning flicker within cloud
+            if (random.nextFloat() < 0.1f) {
+                Vec3 flashCenter = center.add(
+                        (random.nextDouble() - 0.5) * baseSize,
+                        (random.nextDouble() - 0.5) * 0.5,
+                        (random.nextDouble() - 0.5) * baseSize
+                );
+
+                VectorRenderer.drawSphereWorld(flashCenter, 0.3f, GLOW_COLOR,
+                        4, 6, true, 3, null);
+            }
+        }
     }
 
     private static class ElectricChain {
@@ -102,18 +242,20 @@ public class ElectricityRenderer {
         private int duration;
         private int age = 0;
         private int nextFlicker = 0;
+        private final boolean fromCloud;
 
-        public ElectricChain(Entity source, List<LivingEntity> targets, int duration) {
+        public ElectricChain(Entity source, List<LivingEntity> targets, int duration, boolean fromCloud) {
             this.source = source;
             this.targets = new ArrayList<>(targets);
             this.duration = duration;
+            this.fromCloud = fromCloud;
         }
 
         public boolean tick() {
             age++;
 
             if (age >= nextFlicker) {
-                generateBolts(source.level());
+                generateBolts(source != null ? source.level() : targets.get(0).level());
                 nextFlicker = age + FLICKER_INTERVAL + random.nextInt(2);
             }
 
@@ -131,15 +273,45 @@ public class ElectricityRenderer {
 
             if (validTargets.isEmpty()) return;
 
-            Vec3 sourcePos = getEntityCenter(source);
-            if (sourcePos == null) return;
-
-            // Draw sequential chain connections
-            drawSequentialChain(sourcePos, validTargets);
+            if (fromCloud) {
+                drawCloudLightning(validTargets);
+            } else {
+                Vec3 sourcePos = getEntityCenter(source);
+                if (sourcePos != null) {
+                    drawSequentialChain(sourcePos, validTargets);
+                }
+            }
         }
 
         /**
-         * Draws the sequential chain from player -> first mob -> second mob -> etc.
+         * Draws lightning from storm cloud to targets
+         */
+        private void drawCloudLightning(List<LivingEntity> validTargets) {
+            // Find the cloud position (approximately above the first target)
+            Vec3 firstTargetPos = getEntityCenter(validTargets.get(0));
+            if (firstTargetPos == null) return;
+
+            Vec3 cloudPos = firstTargetPos.add(0, 4.0 + random.nextGaussian() * 0.5, 0);
+
+            // Draw lightning from cloud to first target, then chain between targets
+            Vec3 previousPos = cloudPos;
+
+            for (int i = 0; i < validTargets.size(); i++) {
+                LivingEntity currentTarget = validTargets.get(i);
+                Vec3 currentPos = getEntityCenter(currentTarget);
+
+                if (currentPos == null) continue;
+
+                // For cloud lightning, all connections are considered chain level 0 (primary)
+                generateAdvancedLightningBolt(previousPos, currentPos, 0);
+
+                // Update previous position for next iteration
+                previousPos = currentPos;
+            }
+        }
+
+        /**
+         * Draws the sequential chain from source -> first mob -> second mob -> etc.
          */
         private void drawSequentialChain(Vec3 sourcePos, List<LivingEntity> validTargets) {
             Vec3 previousPos = sourcePos;
@@ -150,7 +322,6 @@ public class ElectricityRenderer {
 
                 if (currentPos == null) continue;
 
-                // Draw connection from previous position to current target
                 // First connection is from player (chainLevel = 0)
                 // Subsequent connections are between mobs (chainLevel = 1)
                 int chainLevel = (i == 0) ? 0 : 1;
@@ -220,10 +391,10 @@ public class ElectricityRenderer {
                 double deviationStrength = BASE_DEVIATION * Math.pow(DEVIATION_DECAY, t * 1.5);
 
                 // Add momentum to create smoother, more natural curves
-                double momentum = 0.7; // Higher momentum for smoother curves
+                double momentum = 0.7;
                 Vec3 newRandomDeviation = new Vec3(
                         (random.nextGaussian()) * deviationStrength * 0.8,
-                        (random.nextGaussian()) * deviationStrength * 0.5, // Less vertical deviation
+                        (random.nextGaussian()) * deviationStrength * 0.5,
                         (random.nextGaussian()) * deviationStrength * 0.8
                 );
 
@@ -259,7 +430,7 @@ public class ElectricityRenderer {
             float thicknessMultiplier = 1.0f / (1.0f + chainLevel * 0.25f);
             float brightnessMultiplier = 1.0f / (1.0f + chainLevel * 0.15f);
 
-            // Draw multiple layers for realistic glow effect with proper white/yellow colors
+            // Draw multiple layers for realistic glow effect with updated colors
 
             // Outermost glow layer (very soft and wide)
             int softGlow = adjustColorBrightness(GLOW_COLOR, brightnessMultiplier * 0.4f);
@@ -324,7 +495,7 @@ public class ElectricityRenderer {
                     Vec3 mainDir = mainPath.get(i + 1).subtract(mainPath.get(i - 1)).normalize();
 
                     // Create branch direction with more natural variation
-                    double branchAngle = (random.nextGaussian() * 0.3) * Math.PI; // Gaussian distribution for more natural angles
+                    double branchAngle = (random.nextGaussian() * 0.3) * Math.PI;
                     double branchElevation = (random.nextGaussian() * 0.15) * Math.PI;
 
                     Vec3 branchDir = new Vec3(
@@ -336,7 +507,7 @@ public class ElectricityRenderer {
                     // Branch length decreases with depth, but varies more naturally
                     double baseBranchLength = 0.6 + random.nextGaussian() * 0.3;
                     double branchLength = Math.abs(baseBranchLength) * Math.pow(0.65, depth);
-                    branchLength = Math.max(0.2, Math.min(2.0, branchLength)); // Clamp to reasonable range
+                    branchLength = Math.max(0.2, Math.min(2.0, branchLength));
 
                     // Generate smoother branch path
                     Vec3 branchEnd = branchStart.add(branchDir.scale(branchLength));
@@ -358,8 +529,8 @@ public class ElectricityRenderer {
         private void drawBranchBolt(List<Vec3> path, int depth, int chainLevel, int baseColor, float thickness) {
             if (path.size() < 2) return;
 
-            float depthFade = (float) Math.pow(0.85, depth); // Less aggressive fading
-            float chainFade = 1.0f / (1.0f + chainLevel * 0.1f); // Less chain fading
+            float depthFade = (float) Math.pow(0.85, depth);
+            float chainFade = 1.0f / (1.0f + chainLevel * 0.1f);
             float totalFade = depthFade * chainFade;
 
             // Branches get progressively thinner and dimmer but remain more visible
@@ -370,7 +541,7 @@ public class ElectricityRenderer {
                 // Primary and secondary branches get multiple layers
                 int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.6f);
                 VectorRenderer.drawPolylineWorld(path, branchGlow,
-                        branchThickness * 3.0f, false, BOLT_LIFETIME, null); // Increased glow
+                        branchThickness * 3.0f, false, BOLT_LIFETIME, null);
 
                 int branchOuter = adjustColorBrightness(OUTER_COLOR, totalFade * 0.8f);
                 VectorRenderer.drawPolylineWorld(path, branchOuter,
@@ -397,11 +568,11 @@ public class ElectricityRenderer {
             int g = (color >> 8) & 0xFF;
             int b = color & 0xFF;
 
-            // Apply brightness multiplier while preserving the white/yellow tint
+            // Apply brightness multiplier while preserving the color tint
             r = Math.min(255, Math.max(0, (int)(r * multiplier)));
             g = Math.min(255, Math.max(0, (int)(g * multiplier)));
             b = Math.min(255, Math.max(0, (int)(b * multiplier)));
-            a = Math.min(255, Math.max(0, (int)(a * Math.min(1.2f, multiplier + 0.3f)))); // Keep alpha more visible
+            a = Math.min(255, Math.max(0, (int)(a * Math.min(1.2f, multiplier + 0.3f))));
 
             return (a << 24) | (r << 16) | (g << 8) | b;
         }

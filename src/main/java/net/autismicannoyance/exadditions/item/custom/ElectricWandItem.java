@@ -1,5 +1,6 @@
 package net.autismicannoyance.exadditions.item.custom;
 
+import net.autismicannoyance.exadditions.client.ElectricityRenderer;
 import net.autismicannoyance.exadditions.network.ElectricityPacket;
 import net.autismicannoyance.exadditions.network.ModNetworking;
 import net.minecraft.server.level.ServerLevel;
@@ -14,27 +15,38 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.PacketDistributor;
 
 import java.util.*;
 
 /**
- * Electric Wand - Creates chained lightning between nearby mobs
- * Updated to use raycast targeting and sequential mob-to-mob chaining
+ * Electric Wand - Creates storm clouds above player that strike nearby mobs with chained lightning
+ * Updated to spawn clouds 3-5 blocks above player and detect mobs within range
  */
 public class ElectricWandItem extends Item {
 
-    private static final double RAYCAST_DISTANCE = 20.0;
-    private static final double CHAIN_RANGE = 5.0; // Changed to 5 blocks as requested
+    private static final double CLOUD_HEIGHT_MIN = 3.0;
+    private static final double CLOUD_HEIGHT_MAX = 5.0;
+    private static final double MOB_DETECTION_RANGE = 6.0; // Range from cloud to detect mobs
+    private static final double CHAIN_RANGE = 5.0; // Range for chaining between mobs
     private static final int MAX_TARGETS = 8;
-    private static final int COOLDOWN_TICKS = 40;
-    private static final int EFFECT_DURATION = 60;
+    private static final int COOLDOWN_TICKS = 60; // Longer cooldown for cloud mode
+    private static final int EFFECT_DURATION = 100; // Longer duration for cloud effects
+    private static final int CLOUD_DURATION = 200; // How long clouds persist
 
     private static final float BASE_DAMAGE = 6.0f;
     private static final float CHAIN_DAMAGE_REDUCTION = 0.8f;
     private static final int STUN_DURATION = 20;
+
+    // Track active storm clouds per player
+    private static final Map<UUID, StormCloud> activeStormClouds = new HashMap<>();
 
     public ElectricWandItem() {
         super(new Properties()
@@ -54,185 +66,70 @@ public class ElectricWandItem extends Item {
 
         if (!level.isClientSide) {
             ServerLevel serverLevel = (ServerLevel) level;
-            List<LivingEntity> targets = findChainableTargetsWithRaycast(serverLevel, player);
 
-            if (!targets.isEmpty()) {
-                player.getCooldowns().addCooldown(this, COOLDOWN_TICKS);
-                stack.hurtAndBreak(1, player, (p) -> p.broadcastBreakEvent(hand));
-                applyElectricEffects(serverLevel, player, targets);
-                sendElectricityPacket(serverLevel, player, targets);
+            // Create or refresh storm cloud above player
+            createStormCloud(serverLevel, player, stack, hand);
 
-                level.playSound(null, player.getX(), player.getY(), player.getZ(),
-                        SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.PLAYERS,
-                        0.8f, 1.2f + level.random.nextFloat() * 0.4f);
+            player.getCooldowns().addCooldown(this, COOLDOWN_TICKS);
 
-                return InteractionResultHolder.success(stack);
-            }
+            // Play thunder sound for cloud creation
+            level.playSound(null, player.getX(), player.getY(), player.getZ(),
+                    SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.PLAYERS,
+                    0.5f, 0.8f + level.random.nextFloat() * 0.4f);
+
+            return InteractionResultHolder.success(stack);
         }
 
         return InteractionResultHolder.fail(stack);
     }
 
     /**
-     * New method that uses raycast to find the initial target, then chains from mob to mob
+     * Creates a storm cloud above the player
      */
-    private List<LivingEntity> findChainableTargetsWithRaycast(ServerLevel level, Player player) {
-        // First, perform raycast to find the initial target
-        LivingEntity initialTarget = findInitialTargetWithRaycast(level, player);
+    private void createStormCloud(ServerLevel level, Player player, ItemStack stack, InteractionHand hand) {
+        UUID playerId = player.getUUID();
 
-        if (initialTarget == null) {
-            return Collections.emptyList();
-        }
+        // Remove existing storm cloud if present
+        activeStormClouds.remove(playerId);
 
-        // Now chain from the initial target to other nearby mobs
-        List<LivingEntity> chainedTargets = new ArrayList<>();
-        Set<LivingEntity> visited = new HashSet<>();
+        // Calculate cloud position (3-5 blocks above player with some randomness)
+        double cloudHeight = CLOUD_HEIGHT_MIN + level.random.nextDouble() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
+        Vec3 cloudPosition = player.position().add(0, cloudHeight, 0);
 
-        // Add the initial target
-        chainedTargets.add(initialTarget);
-        visited.add(initialTarget);
+        // Create new storm cloud
+        StormCloud stormCloud = new StormCloud(level, player, cloudPosition, CLOUD_DURATION, stack, hand);
+        activeStormClouds.put(playerId, stormCloud);
 
-        // Find all potential chain targets in the area
-        Vec3 searchCenter = initialTarget.position();
-        AABB searchBox = new AABB(searchCenter, searchCenter).inflate(CHAIN_RANGE * 2); // Search in larger area
-
-        List<LivingEntity> potentialTargets = level.getEntitiesOfClass(LivingEntity.class, searchBox,
-                entity -> entity != player && entity != initialTarget && entity.isAlive());
-
-        // Chain from mob to mob
-        LivingEntity currentTarget = initialTarget;
-
-        while (chainedTargets.size() < MAX_TARGETS && potentialTargets.size() > 0) {
-            LivingEntity nextTarget = findNearestUnvisitedTarget(currentTarget, potentialTargets, visited);
-
-            if (nextTarget == null || currentTarget.distanceTo(nextTarget) > CHAIN_RANGE) {
-                break; // No more valid targets within range
-            }
-
-            chainedTargets.add(nextTarget);
-            visited.add(nextTarget);
-            potentialTargets.remove(nextTarget); // Remove from potential targets
-            currentTarget = nextTarget; // Move to the next target in the chain
-        }
-
-        return chainedTargets;
+        // Send packet to clients for visual cloud rendering
+        sendStormCloudPacket(level, player, cloudPosition, CLOUD_DURATION);
     }
 
     /**
-     * Performs a raycast from the player's look direction to find the initial target
+     * Tick method to be called from your mod's tick handler
      */
-    private LivingEntity findInitialTargetWithRaycast(ServerLevel level, Player player) {
-        // Get player's look direction
-        Vec3 eyePos = player.getEyePosition();
-        Vec3 lookVec = player.getLookAngle();
-        Vec3 endPos = eyePos.add(lookVec.scale(RAYCAST_DISTANCE));
+    public static void tickStormClouds() {
+        Iterator<Map.Entry<UUID, StormCloud>> iterator = activeStormClouds.entrySet().iterator();
 
-        // First check for block collision to limit our search
-        ClipContext clipContext = new ClipContext(
-                eyePos,
-                endPos,
-                ClipContext.Block.COLLIDER,
-                ClipContext.Fluid.NONE,
-                player
-        );
+        while (iterator.hasNext()) {
+            Map.Entry<UUID, StormCloud> entry = iterator.next();
+            StormCloud cloud = entry.getValue();
 
-        BlockHitResult blockHit = level.clip(clipContext);
-        if (blockHit.getType() != HitResult.Type.MISS) {
-            endPos = blockHit.getLocation(); // Limit raycast to where we hit a block
-        }
-
-        // Create a bounding box along the raycast path to find entities
-        AABB raycastBox = new AABB(eyePos, endPos).inflate(1.0); // 1 block tolerance
-
-        List<LivingEntity> entitiesInPath = level.getEntitiesOfClass(LivingEntity.class, raycastBox,
-                entity -> entity != player && entity.isAlive());
-
-        // Find the closest entity to the raycast line
-        LivingEntity closestEntity = null;
-        double closestDistance = Double.MAX_VALUE;
-
-        for (LivingEntity entity : entitiesInPath) {
-            // Calculate distance from entity to the raycast line
-            Vec3 entityPos = entity.position().add(0, entity.getBbHeight() * 0.5, 0); // Entity center
-            double distanceToRay = distancePointToLine(entityPos, eyePos, endPos);
-            double distanceToPlayer = player.distanceTo(entity);
-
-            // Prioritize entities closer to the raycast line and closer to the player
-            double score = distanceToRay + (distanceToPlayer * 0.1); // Weight distance to ray more heavily
-
-            if (score < closestDistance && distanceToRay <= 2.0) { // Must be within 2 blocks of raycast line
-                closestDistance = score;
-                closestEntity = entity;
+            if (cloud.tick()) {
+                iterator.remove(); // Remove expired clouds
             }
         }
-
-        return closestEntity;
     }
 
     /**
-     * Finds the nearest unvisited target to the current target
+     * Clear all storm clouds (useful for cleanup)
      */
-    private LivingEntity findNearestUnvisitedTarget(LivingEntity currentTarget, List<LivingEntity> potentialTargets, Set<LivingEntity> visited) {
-        LivingEntity nearest = null;
-        double nearestDistance = Double.MAX_VALUE;
-
-        for (LivingEntity target : potentialTargets) {
-            if (!visited.contains(target)) {
-                double distance = currentTarget.distanceTo(target);
-                if (distance < nearestDistance) {
-                    nearestDistance = distance;
-                    nearest = target;
-                }
-            }
-        }
-
-        return nearest;
+    public static void clearAllStormClouds() {
+        activeStormClouds.clear();
     }
 
-    /**
-     * Calculates the distance from a point to a line segment
-     */
-    private double distancePointToLine(Vec3 point, Vec3 lineStart, Vec3 lineEnd) {
-        Vec3 lineVec = lineEnd.subtract(lineStart);
-        Vec3 pointVec = point.subtract(lineStart);
-
-        double lineLength = lineVec.length();
-        if (lineLength == 0) {
-            return point.distanceTo(lineStart);
-        }
-
-        // Project point onto line
-        double t = Math.max(0, Math.min(1, pointVec.dot(lineVec) / (lineLength * lineLength)));
-        Vec3 projection = lineStart.add(lineVec.scale(t));
-
-        return point.distanceTo(projection);
-    }
-
-    private void applyElectricEffects(ServerLevel level, Player player, List<LivingEntity> targets) {
-        // Choose which DamageSource you want:
-        // - Attributed to player: mobAttack(player) or playerAttack(player)
-        // - Vanilla lightning style (not attributed): lightningBolt()
-        DamageSource electricDamage = level.damageSources().mobAttack(player);
-
-        for (int i = 0; i < targets.size(); i++) {
-            LivingEntity target = targets.get(i);
-            float damage = BASE_DAMAGE * (float) Math.pow(CHAIN_DAMAGE_REDUCTION, i);
-            target.hurt(electricDamage, damage);
-
-            if (target.isAlive()) {
-                Vec3 knockback = target.position().subtract(player.position()).normalize().scale(0.3);
-                target.setDeltaMovement(target.getDeltaMovement().add(knockback.x, 0.1, knockback.z));
-                // mark as hurt so client-side damage effects show
-                target.hurtMarked = true;
-            }
-        }
-    }
-
-    private void sendElectricityPacket(ServerLevel level, Player player, List<LivingEntity> targets) {
-        List<Integer> targetIds = new ArrayList<>(targets.size());
-        for (LivingEntity t : targets) targetIds.add(t.getId());
-
-        ElectricityPacket packet = new ElectricityPacket(player.getId(), targetIds, EFFECT_DURATION);
+    private void sendStormCloudPacket(ServerLevel level, Player player, Vec3 cloudPosition, int duration) {
+        // For now, we'll use empty targets list - the cloud will be rendered separately
+        ElectricityPacket packet = new ElectricityPacket(player.getId(), Collections.emptyList(), duration);
 
         PacketDistributor.TargetPoint targetPoint = new PacketDistributor.TargetPoint(
                 player.getX(), player.getY(), player.getZ(), 64.0, level.dimension()
@@ -241,14 +138,216 @@ public class ElectricWandItem extends Item {
         ModNetworking.CHANNEL.send(PacketDistributor.NEAR.with(() -> targetPoint), packet);
     }
 
+    /**
+     * Storm cloud that hovers above the player and strikes nearby mobs
+     */
+    private static class StormCloud {
+        private final ServerLevel level;
+        private final Player player;
+        private Vec3 position;
+        private final int maxAge;
+        private int age = 0;
+        private int nextLightningCheck = 0;
+        private final ItemStack wandStack;
+        private final InteractionHand hand;
+
+        private static final int LIGHTNING_CHECK_INTERVAL = 20; // Check for targets every second
+        private static final int MIN_LIGHTNING_COOLDOWN = 40; // Minimum 2 seconds between strikes
+
+        public StormCloud(ServerLevel level, Player player, Vec3 position, int maxAge, ItemStack wandStack, InteractionHand hand) {
+            this.level = level;
+            this.player = player;
+            this.position = position;
+            this.maxAge = maxAge;
+            this.wandStack = wandStack;
+            this.hand = hand;
+        }
+
+        public boolean tick() {
+            age++;
+
+            // Update cloud position to follow player
+            if (player.isAlive() && !player.isRemoved()) {
+                double cloudHeight = CLOUD_HEIGHT_MIN + level.random.nextDouble() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
+                position = player.position().add(
+                        level.random.nextGaussian() * 0.5, // Small horizontal drift
+                        cloudHeight,
+                        level.random.nextGaussian() * 0.5
+                );
+            }
+
+            // Check for lightning strikes
+            if (age >= nextLightningCheck && player.isAlive()) {
+                checkForLightningStrike();
+                nextLightningCheck = age + LIGHTNING_CHECK_INTERVAL;
+            }
+
+            return age >= maxAge || !player.isAlive() || player.isRemoved();
+        }
+
+        private void checkForLightningStrike() {
+            // Find mobs within range of the cloud
+            AABB detectionBox = new AABB(position, position).inflate(MOB_DETECTION_RANGE);
+
+            List<LivingEntity> nearbyMobs = level.getEntitiesOfClass(LivingEntity.class, detectionBox,
+                    entity -> entity != player && entity.isAlive() && !entity.isRemoved());
+
+            if (!nearbyMobs.isEmpty()) {
+                // Find the closest mob as the initial target
+                LivingEntity closestMob = findClosestMob(nearbyMobs);
+
+                if (closestMob != null) {
+                    // Create chained lightning from cloud to mobs
+                    List<LivingEntity> chainTargets = findChainTargets(closestMob, nearbyMobs);
+
+                    if (!chainTargets.isEmpty()) {
+                        triggerLightningStrike(chainTargets);
+                        nextLightningCheck = age + MIN_LIGHTNING_COOLDOWN + level.random.nextInt(20);
+                    }
+                }
+            }
+        }
+
+        private LivingEntity findClosestMob(List<LivingEntity> mobs) {
+            LivingEntity closest = null;
+            double closestDistance = Double.MAX_VALUE;
+
+            for (LivingEntity mob : mobs) {
+                double distance = position.distanceTo(mob.position().add(0, mob.getBbHeight() * 0.5, 0));
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closest = mob;
+                }
+            }
+
+            return closest;
+        }
+
+        private List<LivingEntity> findChainTargets(LivingEntity initialTarget, List<LivingEntity> allMobs) {
+            List<LivingEntity> chainTargets = new ArrayList<>();
+            Set<LivingEntity> visited = new HashSet<>();
+
+            chainTargets.add(initialTarget);
+            visited.add(initialTarget);
+
+            // Chain from the initial target to other nearby mobs
+            LivingEntity currentTarget = initialTarget;
+
+            while (chainTargets.size() < MAX_TARGETS) {
+                LivingEntity nextTarget = findNearestUnvisitedMob(currentTarget, allMobs, visited);
+
+                if (nextTarget == null || currentTarget.distanceTo(nextTarget) > CHAIN_RANGE) {
+                    break; // No more valid targets within range
+                }
+
+                chainTargets.add(nextTarget);
+                visited.add(nextTarget);
+                currentTarget = nextTarget;
+            }
+
+            return chainTargets;
+        }
+
+        private LivingEntity findNearestUnvisitedMob(LivingEntity currentTarget, List<LivingEntity> allMobs, Set<LivingEntity> visited) {
+            LivingEntity nearest = null;
+            double nearestDistance = Double.MAX_VALUE;
+
+            for (LivingEntity mob : allMobs) {
+                if (!visited.contains(mob)) {
+                    double distance = currentTarget.distanceTo(mob);
+                    if (distance < nearestDistance) {
+                        nearestDistance = distance;
+                        nearest = mob;
+                    }
+                }
+            }
+
+            return nearest;
+        }
+
+        private void triggerLightningStrike(List<LivingEntity> targets) {
+            // Apply damage and effects
+            applyElectricEffects(targets);
+
+            // Damage wand
+            wandStack.hurtAndBreak(1, player, (p) -> p.broadcastBreakEvent(hand));
+
+            // Send visual effect packet (we'll use the cloud position as the "source")
+            sendLightningEffectPacket(targets);
+
+            // Play lightning sound
+            level.playSound(null, position.x, position.y, position.z,
+                    SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS,
+                    1.0f, 1.2f + level.random.nextFloat() * 0.6f);
+        }
+
+        private void applyElectricEffects(List<LivingEntity> targets) {
+            DamageSource electricDamage = level.damageSources().mobAttack(player);
+
+            for (int i = 0; i < targets.size(); i++) {
+                LivingEntity target = targets.get(i);
+                float damage = BASE_DAMAGE * (float) Math.pow(CHAIN_DAMAGE_REDUCTION, i);
+                target.hurt(electricDamage, damage);
+
+                if (target.isAlive()) {
+                    // Knockback effect
+                    Vec3 knockback = target.position().subtract(player.position()).normalize().scale(0.3);
+                    target.setDeltaMovement(target.getDeltaMovement().add(knockback.x, 0.2, knockback.z));
+                    target.hurtMarked = true;
+                }
+            }
+        }
+
+        private void sendLightningEffectPacket(List<LivingEntity> targets) {
+            List<Integer> targetIds = new ArrayList<>();
+            for (LivingEntity target : targets) {
+                targetIds.add(target.getId());
+            }
+
+            // Create a temporary "cloud entity" ID for the source (using negative player ID)
+            ElectricityPacket packet = new ElectricityPacket(-player.getId(), targetIds, 60);
+
+            PacketDistributor.TargetPoint targetPoint = new PacketDistributor.TargetPoint(
+                    position.x, position.y, position.z, 64.0, level.dimension()
+            );
+
+            ModNetworking.CHANNEL.send(PacketDistributor.NEAR.with(() -> targetPoint), packet);
+        }
+    }
+
     @Override
     public boolean isFoil(ItemStack stack) {
         return true;
     }
 
     @Override
-    public boolean isValidRepairItem(ItemStack toRepair, ItemStack repair) {
+    public boolean isValidRepairItem(ItemStack stack, ItemStack repair) {
         return repair.getItem() == net.minecraft.world.item.Items.DIAMOND ||
                 repair.getItem() == net.minecraft.world.item.Items.NETHERITE_INGOT;
+    }
+
+    // ============== INTEGRATED EVENT HANDLING ==============
+
+    /**
+     * Server tick event handler - ticks all active storm clouds
+     */
+    @SubscribeEvent
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            tickStormClouds();
+        }
+    }
+
+    /**
+     * Client tick event handler - ticks electricity renderer
+     */
+    @SubscribeEvent
+    @OnlyIn(Dist.CLIENT)
+    public static void onClientTick(TickEvent.ClientTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
+                ElectricityRenderer.tick();
+            });
+        }
     }
 }
