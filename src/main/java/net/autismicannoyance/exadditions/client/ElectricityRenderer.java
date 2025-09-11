@@ -11,37 +11,48 @@ import java.util.*;
 
 /**
  * Handles realistic electricity/lightning rendering with chaining effects
- * Enhanced version with improved visual fidelity and natural lightning patterns
+ * Enhanced version with authentic white/yellow lightning and multi-level branching
  */
 public class ElectricityRenderer {
     private static final Map<Integer, ElectricChain> activeChains = new HashMap<>();
     private static final RandomSource random = RandomSource.create();
 
     // Enhanced electricity visual parameters
-    private static final float MAIN_BOLT_THICKNESS = 0.12f;
-    private static final float BRANCH_THICKNESS = 0.06f;
-    private static final float GLOW_THICKNESS = 0.25f;
+    private static final float MAIN_BOLT_THICKNESS = 0.15f;
+    private static final float PRIMARY_BRANCH_THICKNESS = 0.08f;
+    private static final float SECONDARY_BRANCH_THICKNESS = 0.04f;
+    private static final float TERTIARY_BRANCH_THICKNESS = 0.02f;
+    private static final float GLOW_THICKNESS = 0.35f;
 
-    // Enhanced color scheme for more realistic electricity
-    private static final int CORE_COLOR = 0xFFFFFFFF;        // Pure white core
-    private static final int INNER_COLOR = 0xFFAADDFF;       // Bright electric blue
-    private static final int OUTER_COLOR = 0xFF6699DD;       // Medium blue
-    private static final int GLOW_COLOR = 0x44AAFFFF;        // Soft blue glow
-    private static final int BRANCH_COLOR = 0xAA88AAFF;      // Dimmer branch color
+    // Realistic white/yellow lightning color scheme
+    private static final int CORE_COLOR = 0xFFFFFFF0;          // Pure white with slight yellow tint
+    private static final int INNER_COLOR = 0xFFFFFFDD;         // Bright warm white
+    private static final int MIDDLE_COLOR = 0xFFFFFF88;        // Light yellow-white
+    private static final int OUTER_COLOR = 0xFFFFDD44;         // Soft yellow glow
+    private static final int GLOW_COLOR = 0x44FFEE88;          // Very soft yellow glow
+
+    // Branch colors (dimmer versions)
+    private static final int PRIMARY_BRANCH_COLOR = 0xFFFFFFCC;    // Slightly dimmer white
+    private static final int SECONDARY_BRANCH_COLOR = 0xFFFFDD99;  // Warm white-yellow
+    private static final int TERTIARY_BRANCH_COLOR = 0xFFDDDD66;   // Dimmer yellow-white
 
     // Enhanced animation parameters
-    private static final int BOLT_LIFETIME = 12;
-    private static final int FLICKER_INTERVAL = 3;
+    private static final int BOLT_LIFETIME = 15;
+    private static final int FLICKER_INTERVAL = 2;
     private static final float MAX_CHAIN_DISTANCE = 6.0f;
 
     // Improved generation parameters for more natural lightning
-    private static final float MIN_SEGMENT_LENGTH = 0.3f;    // Minimum segment size
-    private static final float MAX_SEGMENT_LENGTH = 1.2f;    // Maximum segment size
-    private static final float BASE_DEVIATION = 0.4f;       // Base randomness strength
-    private static final float DEVIATION_DECAY = 0.85f;     // How deviation decreases over distance
-    private static final int MIN_SEGMENTS = 4;              // Minimum segments per bolt
-    private static final float BRANCH_PROBABILITY = 0.35f;  // Chance per segment to spawn branch
-    private static final int MAX_BRANCH_DEPTH = 2;          // Maximum branch recursion
+    private static final float MIN_SEGMENT_LENGTH = 0.25f;
+    private static final float MAX_SEGMENT_LENGTH = 1.0f;
+    private static final float BASE_DEVIATION = 0.5f;
+    private static final float DEVIATION_DECAY = 0.8f;
+    private static final int MIN_SEGMENTS = 5;
+
+    // Multi-level branching parameters
+    private static final float PRIMARY_BRANCH_PROBABILITY = 0.45f;    // Higher chance for main branches
+    private static final float SECONDARY_BRANCH_PROBABILITY = 0.35f;  // Medium chance for sub-branches
+    private static final float TERTIARY_BRANCH_PROBABILITY = 0.25f;   // Lower chance for minor branches
+    private static final int MAX_BRANCH_DEPTH = 3;                    // Three levels: primary, secondary, tertiary
 
     /**
      * Creates a chained electricity effect between entities
@@ -100,7 +111,7 @@ public class ElectricityRenderer {
 
             if (age >= nextFlicker) {
                 generateBolts(source.level());
-                nextFlicker = age + FLICKER_INTERVAL + random.nextInt(3);
+                nextFlicker = age + FLICKER_INTERVAL + random.nextInt(2);
             }
 
             return age >= duration;
@@ -140,19 +151,19 @@ public class ElectricityRenderer {
         }
 
         private void generateAdvancedLightningBolt(Vec3 start, Vec3 end, int chainLevel) {
-            // Generate more natural main path
-            List<Vec3> mainPath = generateNaturalLightningPath(start, end);
+            // Generate more natural main path with smoother curves
+            List<Vec3> mainPath = generateSmoothLightningPath(start, end);
 
             if (mainPath.size() < 2) return;
 
             // Draw layered bolt for better visual effect
             drawLayeredBolt(mainPath, chainLevel);
 
-            // Generate organic branches
-            generateOrganicBranches(mainPath, 0, chainLevel);
+            // Generate multi-level branching system
+            generateMultiLevelBranches(mainPath, 0, chainLevel);
         }
 
-        private List<Vec3> generateNaturalLightningPath(Vec3 start, Vec3 end) {
+        private List<Vec3> generateSmoothLightningPath(Vec3 start, Vec3 end) {
             List<Vec3> path = new ArrayList<>();
             path.add(start);
 
@@ -178,85 +189,124 @@ public class ElectricityRenderer {
             perpendicular1 = perpendicular1.normalize();
             Vec3 perpendicular2 = direction.cross(perpendicular1).normalize();
 
-            // Generate path with decreasing deviation and more natural curves
+            // Generate path with smooth curves and decreasing deviation
             Vec3 currentDeviation = Vec3.ZERO;
+            Vec3 previousPoint = start;
 
             for (int i = 1; i < segments; i++) {
                 double t = (double) i / segments;
                 Vec3 basePoint = start.add(direction.scale(totalDistance * t));
 
-                // Calculate deviation that decreases as we approach the target
-                double deviationStrength = BASE_DEVIATION * Math.pow(DEVIATION_DECAY, t * 2);
+                // Smooth deviation that decreases towards target
+                double deviationStrength = BASE_DEVIATION * Math.pow(DEVIATION_DECAY, t * 1.5);
 
-                // Add some continuity to the deviation (lightning tends to curve smoothly)
-                double momentum = 0.6; // How much previous deviation affects current
+                // Add momentum to create smoother, more natural curves
+                double momentum = 0.7; // Higher momentum for smoother curves
                 Vec3 newRandomDeviation = new Vec3(
-                        (random.nextDouble() - 0.5) * deviationStrength,
-                        (random.nextDouble() - 0.5) * deviationStrength * 0.7, // Less vertical deviation
-                        (random.nextDouble() - 0.5) * deviationStrength
+                        (random.nextGaussian()) * deviationStrength * 0.8,
+                        (random.nextGaussian()) * deviationStrength * 0.5, // Less vertical deviation
+                        (random.nextGaussian()) * deviationStrength * 0.8
                 );
 
                 currentDeviation = currentDeviation.scale(momentum).add(newRandomDeviation.scale(1 - momentum));
 
-                // Apply perpendicular deviation
+                // Apply perpendicular deviation with smoothing
                 Vec3 deviatedPoint = basePoint
                         .add(perpendicular1.scale(currentDeviation.x))
                         .add(perpendicular2.scale(currentDeviation.z))
                         .add(0, currentDeviation.y, 0);
 
+                // Additional smoothing pass to reduce sharp angles
+                if (path.size() > 1) {
+                    Vec3 smoothingVector = previousPoint.subtract(path.get(path.size() - 2));
+                    if (smoothingVector.length() > 0) {
+                        smoothingVector = smoothingVector.normalize().scale(0.1 * deviationStrength);
+                        deviatedPoint = deviatedPoint.add(smoothingVector);
+                    }
+                }
+
                 path.add(deviatedPoint);
+                previousPoint = deviatedPoint;
             }
 
             path.add(end);
             return path;
         }
-        //
+
         private void drawLayeredBolt(List<Vec3> path, int chainLevel) {
             if (path.size() < 2) return;
 
             // Adjust thickness and brightness based on chain level
-            float thicknessMultiplier = 1.0f / (1.0f + chainLevel * 0.3f);
-            float brightnessMultiplier = 1.0f / (1.0f + chainLevel * 0.2f);
+            float thicknessMultiplier = 1.0f / (1.0f + chainLevel * 0.25f);
+            float brightnessMultiplier = 1.0f / (1.0f + chainLevel * 0.15f);
 
-            // Draw multiple layers for realistic glow effect
+            // Draw multiple layers for realistic glow effect with proper white/yellow colors
 
             // Outermost glow layer (very soft and wide)
-            int softGlow = adjustColorBrightness(GLOW_COLOR, brightnessMultiplier * 0.3f);
+            int softGlow = adjustColorBrightness(GLOW_COLOR, brightnessMultiplier * 0.4f);
             VectorRenderer.drawPolylineWorld(path, softGlow,
-                    GLOW_THICKNESS * thicknessMultiplier * 1.8f, false, BOLT_LIFETIME, null);
+                    GLOW_THICKNESS * thicknessMultiplier * 2.2f, false, BOLT_LIFETIME, null);
 
-            // Middle glow layer
-            int mediumGlow = adjustColorBrightness(OUTER_COLOR, brightnessMultiplier * 0.7f);
-            VectorRenderer.drawPolylineWorld(path, mediumGlow,
-                    GLOW_THICKNESS * thicknessMultiplier, false, BOLT_LIFETIME, null);
+            // Outer glow layer
+            int outerGlow = adjustColorBrightness(OUTER_COLOR, brightnessMultiplier * 0.7f);
+            VectorRenderer.drawPolylineWorld(path, outerGlow,
+                    GLOW_THICKNESS * thicknessMultiplier * 1.5f, false, BOLT_LIFETIME, null);
 
-            // Main bolt layer
-            int mainColor = adjustColorBrightness(INNER_COLOR, brightnessMultiplier);
-            VectorRenderer.drawPolylineWorld(path, mainColor,
-                    MAIN_BOLT_THICKNESS * thicknessMultiplier, false, BOLT_LIFETIME, null);
+            // Middle layer
+            int middleColor = adjustColorBrightness(MIDDLE_COLOR, brightnessMultiplier * 0.85f);
+            VectorRenderer.drawPolylineWorld(path, middleColor,
+                    MAIN_BOLT_THICKNESS * thicknessMultiplier * 1.8f, false, BOLT_LIFETIME, null);
+
+            // Inner layer
+            int innerColor = adjustColorBrightness(INNER_COLOR, brightnessMultiplier * 0.95f);
+            VectorRenderer.drawPolylineWorld(path, innerColor,
+                    MAIN_BOLT_THICKNESS * thicknessMultiplier * 1.2f, false, BOLT_LIFETIME, null);
 
             // Core layer (brightest, thinnest)
             int coreColor = adjustColorBrightness(CORE_COLOR, brightnessMultiplier);
             VectorRenderer.drawPolylineWorld(path, coreColor,
-                    MAIN_BOLT_THICKNESS * thicknessMultiplier * 0.4f, false, BOLT_LIFETIME, null);
+                    MAIN_BOLT_THICKNESS * thicknessMultiplier * 0.6f, false, BOLT_LIFETIME, null);
         }
 
-        private void generateOrganicBranches(List<Vec3> mainPath, int depth, int chainLevel) {
+        private void generateMultiLevelBranches(List<Vec3> mainPath, int depth, int chainLevel) {
             if (depth >= MAX_BRANCH_DEPTH || mainPath.size() < 3) return;
 
-            for (int i = 1; i < mainPath.size() - 1; i++) {
-                // Variable branch probability that decreases with depth and chain level
-                float branchChance = BRANCH_PROBABILITY * (1.0f / (1.0f + depth * 0.7f + chainLevel * 0.3f));
+            // Determine branch probability and color based on depth
+            float branchProbability;
+            int branchColor;
+            float branchThickness;
 
-                if (random.nextFloat() < branchChance) {
+            switch (depth) {
+                case 0: // Primary branches
+                    branchProbability = PRIMARY_BRANCH_PROBABILITY;
+                    branchColor = PRIMARY_BRANCH_COLOR;
+                    branchThickness = PRIMARY_BRANCH_THICKNESS;
+                    break;
+                case 1: // Secondary branches
+                    branchProbability = SECONDARY_BRANCH_PROBABILITY;
+                    branchColor = SECONDARY_BRANCH_COLOR;
+                    branchThickness = SECONDARY_BRANCH_THICKNESS;
+                    break;
+                default: // Tertiary branches
+                    branchProbability = TERTIARY_BRANCH_PROBABILITY;
+                    branchColor = TERTIARY_BRANCH_COLOR;
+                    branchThickness = TERTIARY_BRANCH_THICKNESS;
+                    break;
+            }
+
+            // Reduce probability for chain level and depth
+            branchProbability *= (1.0f / (1.0f + depth * 0.4f + chainLevel * 0.2f));
+
+            for (int i = 1; i < mainPath.size() - 1; i++) {
+                if (random.nextFloat() < branchProbability) {
                     Vec3 branchStart = mainPath.get(i);
 
                     // Calculate main direction for reference
                     Vec3 mainDir = mainPath.get(i + 1).subtract(mainPath.get(i - 1)).normalize();
 
                     // Create branch direction with more natural variation
-                    double branchAngle = (random.nextDouble() - 0.5) * Math.PI; // -90 to +90 degrees
-                    double branchElevation = (random.nextDouble() - 0.5) * Math.PI * 0.4; // Less vertical spread
+                    double branchAngle = (random.nextGaussian() * 0.3) * Math.PI; // Gaussian distribution for more natural angles
+                    double branchElevation = (random.nextGaussian() * 0.15) * Math.PI;
 
                     Vec3 branchDir = new Vec3(
                             Math.cos(branchAngle) * Math.cos(branchElevation),
@@ -264,44 +314,54 @@ public class ElectricityRenderer {
                             Math.sin(branchAngle) * Math.cos(branchElevation)
                     ).normalize();
 
-                    // Branch length decreases with depth
-                    double branchLength = (0.8 + random.nextDouble() * 1.0) * Math.pow(0.7, depth);
+                    // Branch length decreases with depth, but varies more naturally
+                    double baseBranchLength = 0.6 + random.nextGaussian() * 0.3;
+                    double branchLength = Math.abs(baseBranchLength) * Math.pow(0.65, depth);
+                    branchLength = Math.max(0.2, Math.min(2.0, branchLength)); // Clamp to reasonable range
 
-                    // Generate shorter branch path
+                    // Generate smoother branch path
                     Vec3 branchEnd = branchStart.add(branchDir.scale(branchLength));
-                    List<Vec3> branchPath = generateNaturalLightningPath(branchStart, branchEnd);
+                    List<Vec3> branchPath = generateSmoothLightningPath(branchStart, branchEnd);
 
                     if (branchPath.size() >= 2) {
-                        // Draw branch with reduced intensity
-                        drawBranchBolt(branchPath, depth, chainLevel);
+                        // Draw branch with appropriate style for its level
+                        drawBranchBolt(branchPath, depth, chainLevel, branchColor, branchThickness);
 
-                        // Recursive branching (with lower probability)
-                        if (depth < MAX_BRANCH_DEPTH - 1 && random.nextFloat() < 0.3f) {
-                            generateOrganicBranches(branchPath, depth + 1, chainLevel);
+                        // Recursive branching with decreasing probability
+                        if (depth < MAX_BRANCH_DEPTH - 1 && random.nextFloat() < 0.4f) {
+                            generateMultiLevelBranches(branchPath, depth + 1, chainLevel);
                         }
                     }
                 }
             }
         }
 
-        private void drawBranchBolt(List<Vec3> path, int depth, int chainLevel) {
+        private void drawBranchBolt(List<Vec3> path, int depth, int chainLevel, int baseColor, float thickness) {
             if (path.size() < 2) return;
 
-            float depthFade = (float) Math.pow(0.75, depth);
-            float chainFade = 1.0f / (1.0f + chainLevel * 0.2f);
+            float depthFade = (float) Math.pow(0.8, depth);
+            float chainFade = 1.0f / (1.0f + chainLevel * 0.15f);
             float totalFade = depthFade * chainFade;
 
-            // Branches are thinner and dimmer
-            float branchThickness = BRANCH_THICKNESS * totalFade;
+            // Branches get progressively thinner and dimmer
+            float branchThickness = thickness * totalFade;
 
-            // Draw fewer layers for branches to maintain performance
-            int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.4f);
-            VectorRenderer.drawPolylineWorld(path, branchGlow,
-                    branchThickness * 2.0f, false, BOLT_LIFETIME, null);
+            // Draw fewer layers for branches to maintain performance while keeping them visible
+            if (depth == 0) {
+                // Primary branches get two layers
+                int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.5f);
+                VectorRenderer.drawPolylineWorld(path, branchGlow,
+                        branchThickness * 2.5f, false, BOLT_LIFETIME, null);
 
-            int branchMain = adjustColorBrightness(BRANCH_COLOR, totalFade);
-            VectorRenderer.drawPolylineWorld(path, branchMain,
-                    branchThickness, false, BOLT_LIFETIME, null);
+                int branchMain = adjustColorBrightness(baseColor, totalFade);
+                VectorRenderer.drawPolylineWorld(path, branchMain,
+                        branchThickness, false, BOLT_LIFETIME, null);
+            } else {
+                // Secondary and tertiary branches get single layer but remain visible
+                int branchMain = adjustColorBrightness(baseColor, totalFade * 0.9f);
+                VectorRenderer.drawPolylineWorld(path, branchMain,
+                        branchThickness, false, BOLT_LIFETIME, null);
+            }
         }
 
         private int adjustColorBrightness(int color, float multiplier) {
@@ -310,11 +370,11 @@ public class ElectricityRenderer {
             int g = (color >> 8) & 0xFF;
             int b = color & 0xFF;
 
-            // Apply brightness multiplier while preserving alpha
-            r = Math.min(255, (int)(r * multiplier));
-            g = Math.min(255, (int)(g * multiplier));
-            b = Math.min(255, (int)(b * multiplier));
-            a = Math.min(255, (int)(a * Math.min(1.0f, multiplier + 0.2f))); // Slightly less alpha reduction
+            // Apply brightness multiplier while preserving the white/yellow tint
+            r = Math.min(255, Math.max(0, (int)(r * multiplier)));
+            g = Math.min(255, Math.max(0, (int)(g * multiplier)));
+            b = Math.min(255, Math.max(0, (int)(b * multiplier)));
+            a = Math.min(255, Math.max(0, (int)(a * Math.min(1.2f, multiplier + 0.3f)))); // Keep alpha more visible
 
             return (a << 24) | (r << 16) | (g << 8) | b;
         }
