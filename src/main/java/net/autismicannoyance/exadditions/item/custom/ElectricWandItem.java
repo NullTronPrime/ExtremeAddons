@@ -29,7 +29,7 @@ import java.util.*;
 
 /**
  * Electric Wand - Creates storm clouds above player that strike nearby mobs with chained lightning
- * Updated for Forge 1.20.1 with proper event handling and cloud persistence
+ * Updated for Forge 1.20.1 with proper cloud position passing
  */
 public class ElectricWandItem extends Item {
 
@@ -112,25 +112,25 @@ public class ElectricWandItem extends Item {
         StormCloud stormCloud = new StormCloud(level, player, cloudPosition, CLOUD_DURATION, stack, hand);
         activeStormClouds.put(playerId, stormCloud);
 
-        // Send packet to clients for initial visual cloud rendering
+        // Send packet to clients for initial visual cloud rendering with position
         sendStormCloudCreatePacket(level, player, cloudPosition, CLOUD_DURATION);
 
         System.out.println("Storm cloud created at: " + cloudPosition + " for player: " + player.getName().getString());
     }
 
     /**
-     * Send packet to create visual storm cloud
+     * Send packet to create visual storm cloud with position data
      */
     private void sendStormCloudCreatePacket(ServerLevel level, Player player, Vec3 cloudPosition, int duration) {
-        // Use negative player ID to indicate storm cloud creation
-        ElectricityPacket packet = new ElectricityPacket(-Math.abs(player.getId()), Collections.emptyList(), duration);
+        // Use negative player ID to indicate storm cloud creation, pass cloud position
+        ElectricityPacket packet = new ElectricityPacket(-Math.abs(player.getId()), Collections.emptyList(), duration, cloudPosition);
 
         PacketDistributor.TargetPoint targetPoint = new PacketDistributor.TargetPoint(
                 player.getX(), player.getY(), player.getZ(), 64.0, level.dimension()
         );
 
         ModNetworking.CHANNEL.send(PacketDistributor.NEAR.with(() -> targetPoint), packet);
-        System.out.println("Storm cloud creation packet sent to clients");
+        System.out.println("Storm cloud creation packet sent to clients with position: " + cloudPosition);
     }
 
     /**
@@ -345,15 +345,15 @@ public class ElectricWandItem extends Item {
                 targetIds.add(target.getId());
             }
 
-            // Use negative player ID to indicate cloud source
-            ElectricityPacket packet = new ElectricityPacket(-Math.abs(player.getId()), targetIds, 60);
+            // Use negative player ID to indicate cloud source and pass current cloud position
+            ElectricityPacket packet = new ElectricityPacket(-Math.abs(player.getId()), targetIds, 60, position);
 
             PacketDistributor.TargetPoint targetPoint = new PacketDistributor.TargetPoint(
                     position.x, position.y, position.z, 64.0, level.dimension()
             );
 
             ModNetworking.CHANNEL.send(PacketDistributor.NEAR.with(() -> targetPoint), packet);
-            System.out.println("Lightning effect packet sent to clients with " + targetIds.size() + " targets");
+            System.out.println("Lightning effect packet sent to clients with " + targetIds.size() + " targets and cloud position: " + position);
         }
     }
 

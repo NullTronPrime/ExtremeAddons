@@ -38,21 +38,23 @@ public class ElectricityRenderer {
     private static final int SECONDARY_BRANCH_COLOR = 0xFFFFFF88;  // Medium cream
     private static final int TERTIARY_BRANCH_COLOR = 0xFFFFDD44;   // Yellow-cream
 
-    // Cloud colors - made more visible and persistent
-    private static final int CLOUD_DARK = 0xAA222222;          // Semi-transparent dark gray
-    private static final int CLOUD_MEDIUM = 0xAA444444;        // Semi-transparent medium gray
-    private static final int CLOUD_LIGHT = 0xAA666666;         // Semi-transparent light gray
-    private static final int CLOUD_HIGHLIGHT = 0xAA888888;     // Semi-transparent very light gray
+    // Realistic cloud colors - darker grays for storm clouds
+    private static final int CLOUD_DARK_CORE = 0xCC1A1A1A;     // Very dark gray core
+    private static final int CLOUD_DARK = 0xAA2D2D2D;          // Dark gray
+    private static final int CLOUD_MEDIUM_DARK = 0x88404040;   // Medium-dark gray
+    private static final int CLOUD_MEDIUM = 0x66535353;        // Medium gray
+    private static final int CLOUD_LIGHT = 0x44666666;         // Light gray edges
+    private static final int CLOUD_WISPY = 0x22808080;         // Very light wispy edges
 
     // Enhanced animation parameters
     private static final int BOLT_LIFETIME = 15;
     private static final int FLICKER_INTERVAL = 2;
     private static final float MAX_CHAIN_DISTANCE = 6.0f;
 
-    // Cloud parameters - increased persistence
+    // Enhanced cloud parameters
     private static final int CLOUD_LIFETIME = 200;
-    private static final float CLOUD_SIZE = 2.5f;
-    private static final int CLOUD_RENDER_LIFETIME = 60; // How long each cloud particle lasts
+    private static final float CLOUD_SIZE = 3.5f;
+    private static final int CLOUD_RENDER_LIFETIME = 80;
 
     // Improved generation parameters for more natural lightning
     private static final float MIN_SEGMENT_LENGTH = 0.25f;
@@ -89,13 +91,17 @@ public class ElectricityRenderer {
 
         if (!validTargets.isEmpty()) {
             boolean isCloudLightning = source != null && source.getId() < 0;
-            // Pass the actual cloud position if it's cloud lightning
             Vec3 cloudPosition = null;
+
+            // Get cloud position more reliably
             if (isCloudLightning) {
                 int playerId = Math.abs(source.getId());
                 StormCloud cloud = activeStormClouds.get(playerId);
                 if (cloud != null) {
                     cloudPosition = cloud.getCurrentPosition();
+                } else {
+                    // Use source entity position if it's our virtual cloud entity
+                    cloudPosition = source.position();
                 }
             }
 
@@ -104,12 +110,42 @@ public class ElectricityRenderer {
             chain.generateBolts(level);
 
             System.out.println("Created electricity chain: " + (isCloudLightning ? "cloud" : "normal") +
+                    " with " + validTargets.size() + " targets, cloud pos: " + cloudPosition);
+        }
+    }
+
+    /**
+     * Creates a chained electricity effect from a cloud position to targets
+     * Direct method that bypasses entity system for cloud lightning
+     */
+    public static void createCloudLightningChain(Level level, Vec3 cloudPosition, List<Entity> targets, int duration) {
+        if (targets.isEmpty()) {
+            return;
+        }
+
+        // Generate unique chain ID
+        int chainId = cloudPosition.hashCode() + (int)(level.getGameTime() * 31);
+
+        // Validate targets and ensure they're LivingEntity
+        List<LivingEntity> validTargets = new ArrayList<>();
+        for (Entity target : targets) {
+            if (target instanceof LivingEntity living && target.isAlive()) {
+                validTargets.add(living);
+            }
+        }
+
+        if (!validTargets.isEmpty()) {
+            ElectricChain chain = new ElectricChain(null, validTargets, duration, true, cloudPosition);
+            activeChains.put(chainId, chain);
+            chain.generateBolts(level);
+
+            System.out.println("Created cloud lightning chain from " + cloudPosition +
                     " with " + validTargets.size() + " targets");
         }
     }
 
     /**
-     * Creates a storm cloud visual effect with persistent rendering
+     * Creates a storm cloud visual effect with realistic cloud rendering
      */
     public static void createStormCloud(Level level, Entity player, int duration) {
         if (player == null) return;
@@ -153,8 +189,7 @@ public class ElectricityRenderer {
     }
 
     /**
-     * Storm cloud visual effect that hovers above the player
-     * Fixed to render persistent cloud particles
+     * Enhanced storm cloud that looks like an actual storm cloud
      */
     private static class StormCloud {
         private Vec3 basePosition;
@@ -162,18 +197,19 @@ public class ElectricityRenderer {
         private final int maxAge;
         private final Entity player;
         private int nextCloudUpdate = 0;
-        private final List<CloudParticle> cloudParticles;
+        private final List<CloudLayer> cloudLayers;
+        private final List<CloudWisp> cloudWisps;
 
         public StormCloud(Vec3 position, int maxAge, Entity player) {
             this.basePosition = position;
             this.maxAge = maxAge;
             this.player = player;
-            this.cloudParticles = new ArrayList<>();
-            generateInitialCloudParticles();
+            this.cloudLayers = new ArrayList<>();
+            this.cloudWisps = new ArrayList<>();
+            generateCloudStructure();
         }
 
         public Vec3 getCurrentPosition() {
-            // Update position to follow player
             if (player != null && player.isAlive()) {
                 double time = age * 0.05;
                 Vec3 drift = new Vec3(
@@ -186,31 +222,71 @@ public class ElectricityRenderer {
             return basePosition;
         }
 
-        private void generateInitialCloudParticles() {
-            // Create initial cloud structure with persistent particles
-            int numParticles = 12;
-            for (int i = 0; i < numParticles; i++) {
-                double angle = (2 * Math.PI * i) / numParticles;
-                double radius = CLOUD_SIZE * (0.6 + random.nextDouble() * 0.8);
+        private void generateCloudStructure() {
+            Vec3 center = Vec3.ZERO;
 
+            // Core layers - dense and dark
+            for (int i = 0; i < 8; i++) {
+                double angle = (2 * Math.PI * i) / 8;
+                double radius = 0.8 + random.nextDouble() * 0.4;
+                Vec3 offset = new Vec3(
+                        Math.cos(angle) * radius,
+                        (random.nextDouble() - 0.5) * 0.3,
+                        Math.sin(angle) * radius
+                );
+                cloudLayers.add(new CloudLayer(offset, 0.6f + random.nextFloat() * 0.3f, CLOUD_DARK_CORE, 0));
+            }
+
+            // Inner layers - dark storm cloud color
+            for (int i = 0; i < 12; i++) {
+                double angle = (2 * Math.PI * i) / 12;
+                double radius = 1.2 + random.nextDouble() * 0.6;
+                Vec3 offset = new Vec3(
+                        Math.cos(angle) * radius,
+                        (random.nextDouble() - 0.5) * 0.4,
+                        Math.sin(angle) * radius
+                );
+                cloudLayers.add(new CloudLayer(offset, 0.5f + random.nextFloat() * 0.4f, CLOUD_DARK, 1));
+            }
+
+            // Middle layers - medium darkness
+            for (int i = 0; i < 16; i++) {
+                double angle = (2 * Math.PI * i) / 16;
+                double radius = 1.8 + random.nextDouble() * 0.8;
                 Vec3 offset = new Vec3(
                         Math.cos(angle) * radius,
                         (random.nextDouble() - 0.5) * 0.5,
                         Math.sin(angle) * radius
                 );
+                cloudLayers.add(new CloudLayer(offset, 0.4f + random.nextFloat() * 0.5f, CLOUD_MEDIUM_DARK, 2));
+            }
 
-                float size = 0.3f + random.nextFloat() * 0.4f;
-                int color;
+            // Outer layers - lighter but still stormy
+            for (int i = 0; i < 20; i++) {
+                double angle = (2 * Math.PI * i) / 20;
+                double radius = 2.4 + random.nextDouble() * 1.0;
+                Vec3 offset = new Vec3(
+                        Math.cos(angle) * radius,
+                        (random.nextDouble() - 0.5) * 0.6,
+                        Math.sin(angle) * radius
+                );
+                cloudLayers.add(new CloudLayer(offset, 0.3f + random.nextFloat() * 0.6f, CLOUD_MEDIUM, 3));
+            }
 
-                // Vary colors for depth
-                switch (i % 4) {
-                    case 0: color = CLOUD_DARK; break;
-                    case 1: color = CLOUD_MEDIUM; break;
-                    case 2: color = CLOUD_LIGHT; break;
-                    default: color = CLOUD_HIGHLIGHT; break;
-                }
+            // Edge wisps - create cloud-like edges
+            for (int i = 0; i < 30; i++) {
+                double angle = random.nextDouble() * 2 * Math.PI;
+                double radius = 2.8 + random.nextDouble() * 1.5;
+                double height = (random.nextDouble() - 0.5) * 0.8;
 
-                cloudParticles.add(new CloudParticle(offset, size, color));
+                Vec3 offset = new Vec3(
+                        Math.cos(angle) * radius,
+                        height,
+                        Math.sin(angle) * radius
+                );
+
+                cloudWisps.add(new CloudWisp(offset, 0.2f + random.nextFloat() * 0.4f,
+                        random.nextFloat() < 0.3f ? CLOUD_LIGHT : CLOUD_WISPY));
             }
         }
 
@@ -219,53 +295,102 @@ public class ElectricityRenderer {
 
             Vec3 currentPos = getCurrentPosition();
 
-            // Update cloud particles every few ticks for smooth movement
             if (age >= nextCloudUpdate) {
-                updateCloudParticles(currentPos);
-                nextCloudUpdate = age + 3; // Update every 3 ticks for smooth animation
+                updateAndRenderCloud(currentPos);
+                nextCloudUpdate = age + 2; // Update every 2 ticks for smooth animation
             }
 
             return age >= maxAge || (player != null && (!player.isAlive() || player.isRemoved()));
         }
 
-        private void updateCloudParticles(Vec3 center) {
-            // Update and render each cloud particle
-            for (CloudParticle particle : cloudParticles) {
-                // Add gentle floating motion to each particle
-                double time = (age + particle.hashCode()) * 0.02;
-                Vec3 drift = new Vec3(
-                        Math.sin(time) * 0.05,
-                        Math.sin(time * 1.2) * 0.02,
-                        Math.cos(time * 0.9) * 0.05
+        private void updateAndRenderCloud(Vec3 center) {
+            double time = age * 0.01;
+
+            // Render cloud layers with layered depth
+            for (CloudLayer layer : cloudLayers) {
+                // Add gentle movement based on layer depth
+                double layerTime = time * (1.0 + layer.depth * 0.1);
+                Vec3 movement = new Vec3(
+                        Math.sin(layerTime + layer.offset.x) * 0.03 * (4 - layer.depth),
+                        Math.sin(layerTime * 1.2 + layer.offset.y) * 0.02,
+                        Math.cos(layerTime * 0.9 + layer.offset.z) * 0.03 * (4 - layer.depth)
                 );
 
-                Vec3 particlePos = center.add(particle.baseOffset).add(drift);
+                Vec3 layerPos = center.add(layer.offset).add(movement);
 
-                // Render the cloud particle with longer lifetime for persistence
-                VectorRenderer.drawSphereWorld(particlePos, particle.size, particle.color,
-                        4, 6, true, CLOUD_RENDER_LIFETIME, null);
+                // Render as filled polygons for better cloud appearance
+                renderCloudBlob(layerPos, layer.size, layer.color);
             }
 
-            // Occasionally add lightning flicker within cloud
-            if (random.nextFloat() < 0.05f) {
-                Vec3 flashCenter = center.add(
-                        (random.nextDouble() - 0.5) * CLOUD_SIZE,
-                        (random.nextDouble() - 0.5) * 0.3,
-                        (random.nextDouble() - 0.5) * CLOUD_SIZE
+            // Render wispy edges
+            for (CloudWisp wisp : cloudWisps) {
+                double wispTime = time * 0.5;
+                Vec3 wispMovement = new Vec3(
+                        Math.sin(wispTime + wisp.offset.x * 0.1) * 0.08,
+                        Math.sin(wispTime * 1.4 + wisp.offset.y * 0.1) * 0.04,
+                        Math.cos(wispTime * 0.7 + wisp.offset.z * 0.1) * 0.08
                 );
 
-                VectorRenderer.drawSphereWorld(flashCenter, 0.2f, GLOW_COLOR,
-                        3, 4, true, 8, null);
+                Vec3 wispPos = center.add(wisp.offset).add(wispMovement);
+                VectorRenderer.drawSphereWorld(wispPos, wisp.size, wisp.color,
+                        3, 4, true, CLOUD_RENDER_LIFETIME, null);
+            }
+
+            // Occasional internal lightning flashes
+            if (random.nextFloat() < 0.03f) {
+                Vec3 flashCenter = center.add(
+                        (random.nextDouble() - 0.5) * 2.0,
+                        (random.nextDouble() - 0.5) * 0.4,
+                        (random.nextDouble() - 0.5) * 2.0
+                );
+
+                // Brief internal glow
+                VectorRenderer.drawSphereWorld(flashCenter, 0.3f, 0x66FFFF88,
+                        4, 5, true, 12, null);
             }
         }
 
-        private static class CloudParticle {
-            final Vec3 baseOffset;
+        private void renderCloudBlob(Vec3 center, float size, int color) {
+            // Create a more organic cloud shape using multiple overlapping spheres
+            int subdivisions = Math.max(3, (int)(size * 6));
+
+            for (int i = 0; i < subdivisions; i++) {
+                double angle = (2 * Math.PI * i) / subdivisions;
+                double radius = size * 0.6 * (0.8 + random.nextDouble() * 0.4);
+
+                Vec3 blobCenter = center.add(
+                        Math.cos(angle) * radius * 0.3,
+                        (random.nextDouble() - 0.5) * size * 0.2,
+                        Math.sin(angle) * radius * 0.3
+                );
+
+                float blobSize = size * (0.7f + random.nextFloat() * 0.6f);
+                VectorRenderer.drawSphereWorld(blobCenter, blobSize, color,
+                        4, 6, true, CLOUD_RENDER_LIFETIME, null);
+            }
+        }
+
+        private static class CloudLayer {
+            final Vec3 offset;
+            final float size;
+            final int color;
+            final int depth; // 0 = innermost, 3 = outermost
+
+            CloudLayer(Vec3 offset, float size, int color, int depth) {
+                this.offset = offset;
+                this.size = size;
+                this.color = color;
+                this.depth = depth;
+            }
+        }
+
+        private static class CloudWisp {
+            final Vec3 offset;
             final float size;
             final int color;
 
-            CloudParticle(Vec3 baseOffset, float size, int color) {
-                this.baseOffset = baseOffset;
+            CloudWisp(Vec3 offset, float size, int color) {
+                this.offset = offset;
                 this.size = size;
                 this.color = color;
             }
@@ -311,8 +436,8 @@ public class ElectricityRenderer {
 
             if (validTargets.isEmpty()) return;
 
-            if (fromCloud) {
-                drawCloudLightning(validTargets);
+            if (fromCloud && cloudPosition != null) {
+                drawCloudLightning(validTargets, cloudPosition);
             } else if (source != null) {
                 Vec3 sourcePos = getEntityCenter(source);
                 if (sourcePos != null) {
@@ -322,27 +447,9 @@ public class ElectricityRenderer {
         }
 
         /**
-         * Draws lightning from storm cloud to targets using actual cloud position
+         * Draws lightning from storm cloud to targets using stored cloud position
          */
-        private void drawCloudLightning(List<LivingEntity> validTargets) {
-            Vec3 cloudPos = cloudPosition;
-
-            // If we don't have stored cloud position, try to get it from active clouds
-            if (cloudPos == null && source != null) {
-                int playerId = Math.abs(source.getId());
-                StormCloud cloud = activeStormClouds.get(playerId);
-                if (cloud != null) {
-                    cloudPos = cloud.getCurrentPosition();
-                } else {
-                    // Fallback: calculate from first target
-                    Vec3 firstTargetPos = getEntityCenter(validTargets.get(0));
-                    if (firstTargetPos == null) return;
-                    cloudPos = firstTargetPos.add(0, 4.0 + random.nextGaussian() * 0.5, 0);
-                }
-            }
-
-            if (cloudPos == null) return;
-
+        private void drawCloudLightning(List<LivingEntity> validTargets, Vec3 cloudPos) {
             // Draw lightning from cloud to first target, then chain between targets
             Vec3 previousPos = cloudPos;
 
@@ -586,28 +693,31 @@ public class ElectricityRenderer {
             // Branches get progressively thinner and dimmer but remain more visible
             float branchThickness = thickness * totalFade;
 
-            // Enhanced layering for all branch levels
+            // Apply smoothing to branch paths as well
+            List<Vec3> smoothPath = applySmoothingFilter(path);
+
+            // Enhanced layering for all branch levels with smooth paths
             if (depth <= 1) {
                 // Primary and secondary branches get multiple layers
                 int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.6f);
-                VectorRenderer.drawPolylineWorld(path, branchGlow,
+                VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
                         branchThickness * 3.0f, false, BOLT_LIFETIME, null);
 
                 int branchOuter = adjustColorBrightness(OUTER_COLOR, totalFade * 0.8f);
-                VectorRenderer.drawPolylineWorld(path, branchOuter,
+                VectorRenderer.drawPolylineWorld(smoothPath, branchOuter,
                         branchThickness * 2.0f, false, BOLT_LIFETIME, null);
 
                 int branchMain = adjustColorBrightness(baseColor, totalFade);
-                VectorRenderer.drawPolylineWorld(path, branchMain,
+                VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
                         branchThickness, false, BOLT_LIFETIME, null);
             } else {
                 // Tertiary and quaternary branches get two layers but remain visible
                 int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.7f);
-                VectorRenderer.drawPolylineWorld(path, branchGlow,
+                VectorRenderer.drawPolylineWorld(smoothPath, branchGlow,
                         branchThickness * 2.2f, false, BOLT_LIFETIME, null);
 
                 int branchMain = adjustColorBrightness(baseColor, totalFade * 0.95f);
-                VectorRenderer.drawPolylineWorld(path, branchMain,
+                VectorRenderer.drawPolylineWorld(smoothPath, branchMain,
                         branchThickness, false, BOLT_LIFETIME, null);
             }
         }

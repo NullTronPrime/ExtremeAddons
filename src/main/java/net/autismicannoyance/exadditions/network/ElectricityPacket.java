@@ -26,10 +26,6 @@ public class ElectricityPacket {
     private final int duration;
     private final Vec3 cloudPosition; // Store cloud position for accurate lightning source
 
-    public ElectricityPacket(int sourceEntityId, List<Integer> targetEntityIds, int duration) {
-        this(sourceEntityId, targetEntityIds, duration, null);
-    }
-
     public ElectricityPacket(int sourceEntityId, List<Integer> targetEntityIds, int duration, Vec3 cloudPosition) {
         this.sourceEntityId = sourceEntityId;
         this.targetEntityIds = new ArrayList<>(targetEntityIds);
@@ -95,41 +91,6 @@ public class ElectricityPacket {
             }
 
             boolean isCloudLightning = packet.sourceEntityId < 0;
-            Entity sourceEntity = null;
-
-            if (!isCloudLightning) {
-                // Normal player-to-mob lightning
-                sourceEntity = level.getEntity(packet.sourceEntityId);
-                if (sourceEntity == null) {
-                    System.out.println("ElectricityPacket: Source entity not found (ID: " + packet.sourceEntityId + ")");
-                    return;
-                }
-            } else {
-                // Cloud lightning - find the player from the negative ID
-                int playerId = Math.abs(packet.sourceEntityId);
-                Player player = null;
-
-                for (Player p : level.players()) {
-                    if (p.getId() == playerId) {
-                        player = p;
-                        break;
-                    }
-                }
-
-                if (player != null) {
-                    System.out.println("ElectricityPacket: Found player " + player.getName().getString() + " for cloud lightning");
-
-                    // Create a virtual entity for the cloud position if we have one
-                    if (packet.cloudPosition != null) {
-                        sourceEntity = new VirtualCloudEntity(player, packet.cloudPosition);
-                    } else {
-                        sourceEntity = player;
-                    }
-                } else {
-                    System.out.println("ElectricityPacket: Player not found for cloud lightning (ID: " + playerId + ")");
-                    return;
-                }
-            }
 
             // Find all target entities - make sure they're LivingEntity
             List<Entity> targetEntities = new ArrayList<>();
@@ -163,16 +124,50 @@ public class ElectricityPacket {
                 }
             } else if (!targetEntities.isEmpty()) {
                 // This is a lightning strike packet
-                ElectricityRenderer.createElectricityChain(
-                        level,
-                        sourceEntity,
-                        targetEntities,
-                        packet.duration
-                );
+                if (isCloudLightning && packet.cloudPosition != null) {
+                    // Cloud lightning with position data
+                    System.out.println("ElectricityPacket: Creating cloud lightning from position: " + packet.cloudPosition);
+                    ElectricityRenderer.createCloudLightningChain(
+                            level,
+                            packet.cloudPosition,
+                            targetEntities,
+                            packet.duration
+                    );
+                } else if (!isCloudLightning) {
+                    // Normal player-to-mob lightning
+                    Entity sourceEntity = level.getEntity(packet.sourceEntityId);
+                    if (sourceEntity != null) {
+                        ElectricityRenderer.createElectricityChain(
+                                level,
+                                sourceEntity,
+                                targetEntities,
+                                packet.duration
+                        );
+                    } else {
+                        System.out.println("ElectricityPacket: Source entity not found (ID: " + packet.sourceEntityId + ")");
+                        return;
+                    }
+                } else {
+                    // Cloud lightning without position data - fallback to player position
+                    int playerId = Math.abs(packet.sourceEntityId);
+                    for (Player p : level.players()) {
+                        if (p.getId() == playerId) {
+                            Vec3 fallbackCloudPos = p.position().add(0, 4.0, 0);
+                            System.out.println("ElectricityPacket: Creating cloud lightning with fallback position: " + fallbackCloudPos);
+                            ElectricityRenderer.createCloudLightningChain(
+                                    level,
+                                    fallbackCloudPos,
+                                    targetEntities,
+                                    packet.duration
+                            );
+                            break;
+                        }
+                    }
+                }
 
-                String sourceName = sourceEntity != null ? sourceEntity.getName().getString() : "unknown";
+                String sourceDesc = isCloudLightning ? "cloud at " + packet.cloudPosition : "entity " + packet.sourceEntityId;
                 System.out.println("ElectricityPacket: Successfully created electricity chain from " +
-                        sourceName + " to " + targetEntities.size() + " targets");
+                        sourceDesc + " to " + targetEntities.size() + " targets");
             } else {
                 System.out.println("ElectricityPacket: No valid targets found, skipping effect");
             }
@@ -180,48 +175,6 @@ public class ElectricityPacket {
         } catch (Exception e) {
             System.err.println("ElectricityPacket: Error handling packet: " + e.getMessage());
             e.printStackTrace();
-        }
-    }
-
-    /**
-     * Virtual entity to represent cloud position for lightning effects
-     */
-    private static class VirtualCloudEntity extends Entity {
-        private final Vec3 fixedPosition;
-
-        public VirtualCloudEntity(Player player, Vec3 cloudPosition) {
-            super(player.getType(), player.level());
-            this.fixedPosition = cloudPosition;
-            // Note: we avoid forcing a negative ID here. If you rely on an ID marker,
-            // you can optionally call setId(...) if needed and safe for your logic.
-        }
-
-        @Override
-        public Vec3 position() {
-            return fixedPosition;
-        }
-
-        // DON'T override getX/getY/getZ() — those are final in upstream mappings.
-        // Use position() and other non-final accessors instead.
-
-        @Override
-        protected void defineSynchedData() {
-            // Empty implementation - not needed for virtual entity
-        }
-
-        @Override
-        protected void readAdditionalSaveData(net.minecraft.nbt.CompoundTag compound) {
-            // Empty implementation - not needed for virtual entity
-        }
-
-        @Override
-        protected void addAdditionalSaveData(net.minecraft.nbt.CompoundTag compound) {
-            // Empty implementation - not needed for virtual entity
-        }
-
-        @Override
-        public net.minecraft.network.chat.Component getName() {
-            return net.minecraft.network.chat.Component.literal("Storm Cloud");
         }
     }
 
