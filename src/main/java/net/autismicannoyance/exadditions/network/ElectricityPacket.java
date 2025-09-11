@@ -7,6 +7,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
@@ -17,59 +18,63 @@ import java.util.function.Supplier;
 
 /**
  * Network packet for synchronizing electricity effects between server and clients
- * Updated for Forge 1.20.1 with proper cloud lightning support
+ * Updated for Forge 1.20.1 with proper cloud lightning support and cloud position data
  */
 public class ElectricityPacket {
     private final int sourceEntityId;
     private final List<Integer> targetEntityIds;
     private final int duration;
+    private final Vec3 cloudPosition; // Store cloud position for accurate lightning source
 
-    /**
-     * Create a new electricity effect packet
-     * @param sourceEntityId The entity that triggered the electricity (positive = player, negative = cloud)
-     * @param targetEntityIds List of entity IDs that should be connected with electricity
-     * @param duration How long the effect should last in ticks
-     */
     public ElectricityPacket(int sourceEntityId, List<Integer> targetEntityIds, int duration) {
+        this(sourceEntityId, targetEntityIds, duration, null);
+    }
+
+    public ElectricityPacket(int sourceEntityId, List<Integer> targetEntityIds, int duration, Vec3 cloudPosition) {
         this.sourceEntityId = sourceEntityId;
         this.targetEntityIds = new ArrayList<>(targetEntityIds);
         this.duration = duration;
+        this.cloudPosition = cloudPosition;
     }
 
-    /**
-     * Encode the packet data to the network buffer
-     */
     public static void encode(ElectricityPacket packet, FriendlyByteBuf buffer) {
         buffer.writeInt(packet.sourceEntityId);
         buffer.writeInt(packet.duration);
 
-        // Write the number of targets and their IDs
         buffer.writeInt(packet.targetEntityIds.size());
         for (int targetId : packet.targetEntityIds) {
             buffer.writeInt(targetId);
         }
+
+        buffer.writeBoolean(packet.cloudPosition != null);
+        if (packet.cloudPosition != null) {
+            buffer.writeDouble(packet.cloudPosition.x);
+            buffer.writeDouble(packet.cloudPosition.y);
+            buffer.writeDouble(packet.cloudPosition.z);
+        }
     }
 
-    /**
-     * Decode the packet data from the network buffer
-     */
     public static ElectricityPacket decode(FriendlyByteBuf buffer) {
         int sourceEntityId = buffer.readInt();
         int duration = buffer.readInt();
 
-        // Read the target entity IDs
         int targetCount = buffer.readInt();
         List<Integer> targetEntityIds = new ArrayList<>();
         for (int i = 0; i < targetCount; i++) {
             targetEntityIds.add(buffer.readInt());
         }
 
-        return new ElectricityPacket(sourceEntityId, targetEntityIds, duration);
+        Vec3 cloudPosition = null;
+        if (buffer.readBoolean()) {
+            double x = buffer.readDouble();
+            double y = buffer.readDouble();
+            double z = buffer.readDouble();
+            cloudPosition = new Vec3(x, y, z);
+        }
+
+        return new ElectricityPacket(sourceEntityId, targetEntityIds, duration, cloudPosition);
     }
 
-    /**
-     * Handle the packet on the receiving side
-     */
     public static void handle(ElectricityPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         context.enqueueWork(() -> {
@@ -79,10 +84,6 @@ public class ElectricityPacket {
         context.setPacketHandled(true);
     }
 
-    /**
-     * Client-side handling of the electricity packet
-     * Updated with proper cloud lightning support
-     */
     private static void handleClientSide(ElectricityPacket packet) {
         try {
             Minecraft minecraft = Minecraft.getInstance();
@@ -108,7 +109,6 @@ public class ElectricityPacket {
                 int playerId = Math.abs(packet.sourceEntityId);
                 Player player = null;
 
-                // Search for the player
                 for (Player p : level.players()) {
                     if (p.getId() == playerId) {
                         player = p;
@@ -118,7 +118,13 @@ public class ElectricityPacket {
 
                 if (player != null) {
                     System.out.println("ElectricityPacket: Found player " + player.getName().getString() + " for cloud lightning");
-                    sourceEntity = player; // Use the actual player instead of virtual entity
+
+                    // Create a virtual entity for the cloud position if we have one
+                    if (packet.cloudPosition != null) {
+                        sourceEntity = new VirtualCloudEntity(player, packet.cloudPosition);
+                    } else {
+                        sourceEntity = player;
+                    }
                 } else {
                     System.out.println("ElectricityPacket: Player not found for cloud lightning (ID: " + playerId + ")");
                     return;
@@ -147,8 +153,14 @@ public class ElectricityPacket {
             // Handle cloud creation vs lightning strike
             if (targetEntities.isEmpty() && isCloudLightning) {
                 // This is a cloud creation packet (no targets)
-                ElectricityRenderer.createStormCloud(level, sourceEntity, packet.duration);
-                System.out.println("ElectricityPacket: Created storm cloud visual effect");
+                int playerId = Math.abs(packet.sourceEntityId);
+                for (Player p : level.players()) {
+                    if (p.getId() == playerId) {
+                        ElectricityRenderer.createStormCloud(level, p, packet.duration);
+                        System.out.println("ElectricityPacket: Created storm cloud visual effect");
+                        break;
+                    }
+                }
             } else if (!targetEntities.isEmpty()) {
                 // This is a lightning strike packet
                 ElectricityRenderer.createElectricityChain(
@@ -171,7 +183,48 @@ public class ElectricityPacket {
         }
     }
 
-    // Getters for accessing packet data (if needed)
+    /**
+     * Virtual entity to represent cloud position for lightning effects
+     */
+    private static class VirtualCloudEntity extends Entity {
+        private final Vec3 fixedPosition;
+
+        public VirtualCloudEntity(Player player, Vec3 cloudPosition) {
+            super(player.getType(), player.level());
+            this.fixedPosition = cloudPosition;
+            // Note: we avoid forcing a negative ID here. If you rely on an ID marker,
+            // you can optionally call setId(...) if needed and safe for your logic.
+        }
+
+        @Override
+        public Vec3 position() {
+            return fixedPosition;
+        }
+
+        // DON'T override getX/getY/getZ() — those are final in upstream mappings.
+        // Use position() and other non-final accessors instead.
+
+        @Override
+        protected void defineSynchedData() {
+            // Empty implementation - not needed for virtual entity
+        }
+
+        @Override
+        protected void readAdditionalSaveData(net.minecraft.nbt.CompoundTag compound) {
+            // Empty implementation - not needed for virtual entity
+        }
+
+        @Override
+        protected void addAdditionalSaveData(net.minecraft.nbt.CompoundTag compound) {
+            // Empty implementation - not needed for virtual entity
+        }
+
+        @Override
+        public net.minecraft.network.chat.Component getName() {
+            return net.minecraft.network.chat.Component.literal("Storm Cloud");
+        }
+    }
+
     public int getSourceEntityId() {
         return sourceEntityId;
     }
@@ -182,5 +235,9 @@ public class ElectricityPacket {
 
     public int getDuration() {
         return duration;
+    }
+
+    public Vec3 getCloudPosition() {
+        return cloudPosition;
     }
 }

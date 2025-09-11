@@ -46,7 +46,7 @@ public class ElectricWandItem extends Item {
     private static final float CHAIN_DAMAGE_REDUCTION = 0.8f;
     private static final int STUN_DURATION = 20;
 
-    // Track active storm clouds per player
+    // Track active storm clouds per player - store both server and client data
     private static final Map<UUID, StormCloud> activeStormClouds = new HashMap<>();
 
     // Track if events are registered
@@ -134,6 +134,14 @@ public class ElectricWandItem extends Item {
     }
 
     /**
+     * Get current cloud position for a player (used by the renderer)
+     */
+    public static Vec3 getCloudPosition(UUID playerId) {
+        StormCloud cloud = activeStormClouds.get(playerId);
+        return cloud != null ? cloud.getCurrentPosition() : null;
+    }
+
+    /**
      * Tick method to be called from event handler
      */
     public static void tickStormClouds() {
@@ -183,17 +191,26 @@ public class ElectricWandItem extends Item {
             this.hand = hand;
         }
 
+        public Vec3 getCurrentPosition() {
+            return position;
+        }
+
         public boolean tick() {
             age++;
 
-            // Update cloud position to follow player
+            // Update cloud position to follow player with gentle floating motion
             if (player.isAlive() && !player.isRemoved()) {
+                double time = age * 0.02; // Slower movement
                 double cloudHeight = CLOUD_HEIGHT_MIN + level.random.nextDouble() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
-                position = player.position().add(
-                        level.random.nextGaussian() * 0.5,
-                        cloudHeight,
-                        level.random.nextGaussian() * 0.5
+
+                // More subtle floating motion
+                Vec3 drift = new Vec3(
+                        Math.sin(time) * 0.2,
+                        Math.sin(time * 1.3) * 0.1,
+                        Math.cos(time * 0.8) * 0.2
                 );
+
+                position = player.position().add(0, cloudHeight, 0).add(drift);
             }
 
             // Check for lightning strikes
@@ -293,7 +310,7 @@ public class ElectricWandItem extends Item {
             // Damage wand
             wandStack.hurtAndBreak(1, player, (p) -> p.broadcastBreakEvent(hand));
 
-            // Send visual effect packet
+            // Send visual effect packet with current cloud position
             sendLightningEffectPacket(targets);
 
             // Play lightning sound
