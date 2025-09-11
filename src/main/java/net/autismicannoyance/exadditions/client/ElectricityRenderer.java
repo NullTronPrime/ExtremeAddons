@@ -11,25 +11,37 @@ import java.util.*;
 
 /**
  * Handles realistic electricity/lightning rendering with chaining effects
+ * Enhanced version with improved visual fidelity and natural lightning patterns
  */
 public class ElectricityRenderer {
     private static final Map<Integer, ElectricChain> activeChains = new HashMap<>();
     private static final RandomSource random = RandomSource.create();
 
-    // Electricity visual parameters
-    private static final float MAIN_BOLT_THICKNESS = 0.08f;
-    private static final float BRANCH_THICKNESS = 0.04f;
-    private static final int MAIN_BOLT_COLOR = 0xFFAADDFF; // Bright electric blue
-    private static final int BRANCH_COLOR = 0x88AADDFF; // Semi-transparent blue
-    private static final int CORE_COLOR = 0xFFFFFFFF; // White core
+    // Enhanced electricity visual parameters
+    private static final float MAIN_BOLT_THICKNESS = 0.12f;
+    private static final float BRANCH_THICKNESS = 0.06f;
+    private static final float GLOW_THICKNESS = 0.25f;
 
-    // Animation parameters
-    private static final int BOLT_LIFETIME = 8; // ticks
-    private static final int FLICKER_INTERVAL = 2; // ticks between flickers
+    // Enhanced color scheme for more realistic electricity
+    private static final int CORE_COLOR = 0xFFFFFFFF;        // Pure white core
+    private static final int INNER_COLOR = 0xFFAADDFF;       // Bright electric blue
+    private static final int OUTER_COLOR = 0xFF6699DD;       // Medium blue
+    private static final int GLOW_COLOR = 0x44AAFFFF;        // Soft blue glow
+    private static final int BRANCH_COLOR = 0xAA88AAFF;      // Dimmer branch color
+
+    // Enhanced animation parameters
+    private static final int BOLT_LIFETIME = 12;
+    private static final int FLICKER_INTERVAL = 3;
     private static final float MAX_CHAIN_DISTANCE = 6.0f;
-    private static final int MAX_SEGMENT_LENGTH = 2; // blocks per segment
-    private static final float DEVIATION_STRENGTH = 0.3f; // How erratic the lightning is
-    private static final int BRANCHES_PER_BOLT = 3; // Number of side branches
+
+    // Improved generation parameters for more natural lightning
+    private static final float MIN_SEGMENT_LENGTH = 0.3f;    // Minimum segment size
+    private static final float MAX_SEGMENT_LENGTH = 1.2f;    // Maximum segment size
+    private static final float BASE_DEVIATION = 0.4f;       // Base randomness strength
+    private static final float DEVIATION_DECAY = 0.85f;     // How deviation decreases over distance
+    private static final int MIN_SEGMENTS = 4;              // Minimum segments per bolt
+    private static final float BRANCH_PROBABILITY = 0.35f;  // Chance per segment to spawn branch
+    private static final int MAX_BRANCH_DEPTH = 2;          // Maximum branch recursion
 
     /**
      * Creates a chained electricity effect between entities
@@ -37,10 +49,9 @@ public class ElectricityRenderer {
     public static void createElectricityChain(Level level, Entity source, List<Entity> targets, int duration) {
         if (targets.isEmpty()) return;
 
-        int chainId = source.getId() + (int)(level.getGameTime() * 31); // Unique chain ID
+        int chainId = source.getId() + (int)(level.getGameTime() * 31);
         List<LivingEntity> validTargets = new ArrayList<>();
 
-        // Filter for living entities within range
         for (Entity target : targets) {
             if (target instanceof LivingEntity living &&
                     source.distanceTo(target) <= MAX_CHAIN_DISTANCE) {
@@ -55,9 +66,6 @@ public class ElectricityRenderer {
         }
     }
 
-    /**
-     * Updates all active electricity chains
-     */
     public static void tick() {
         Iterator<Map.Entry<Integer, ElectricChain>> iterator = activeChains.entrySet().iterator();
         while (iterator.hasNext()) {
@@ -70,16 +78,10 @@ public class ElectricityRenderer {
         }
     }
 
-    /**
-     * Clears all electricity effects
-     */
     public static void clearAll() {
         activeChains.clear();
     }
 
-    /**
-     * Represents a chain of electricity between entities
-     */
     private static class ElectricChain {
         private final Entity source;
         private final List<LivingEntity> targets;
@@ -96,36 +98,38 @@ public class ElectricityRenderer {
         public boolean tick() {
             age++;
 
-            // Regenerate bolts periodically for flickering effect
             if (age >= nextFlicker) {
                 generateBolts(source.level());
-                nextFlicker = age + FLICKER_INTERVAL + random.nextInt(2);
+                nextFlicker = age + FLICKER_INTERVAL + random.nextInt(3);
             }
 
             return age >= duration;
         }
 
         public void generateBolts(Level level) {
-            // Generate main bolts between source and each target
             Vec3 sourcePos = getEntityCenter(source);
 
+            // Main bolts from source to each target
             for (LivingEntity target : targets) {
                 if (!target.isAlive()) continue;
 
                 Vec3 targetPos = getEntityCenter(target);
-                generateLightningBolt(sourcePos, targetPos);
+                generateAdvancedLightningBolt(sourcePos, targetPos, 0);
             }
 
-            // Generate inter-target bolts for chaining effect
+            // Chain bolts between targets
             for (int i = 0; i < targets.size(); i++) {
                 for (int j = i + 1; j < targets.size(); j++) {
                     LivingEntity target1 = targets.get(i);
                     LivingEntity target2 = targets.get(j);
 
+                    if (!target1.isAlive() || !target2.isAlive()) continue;
+
                     if (target1.distanceTo(target2) <= MAX_CHAIN_DISTANCE) {
                         Vec3 pos1 = getEntityCenter(target1);
                         Vec3 pos2 = getEntityCenter(target2);
-                        generateLightningBolt(pos1, pos2);
+                        // Chain bolts are slightly dimmer and thinner
+                        generateAdvancedLightningBolt(pos1, pos2, 1);
                     }
                 }
             }
@@ -135,48 +139,70 @@ public class ElectricityRenderer {
             return entity.position().add(0, entity.getBbHeight() * 0.5, 0);
         }
 
-        private void generateLightningBolt(Vec3 start, Vec3 end) {
-            // Create the main zigzag bolt
-            List<Vec3> mainPath = generateZigzagPath(start, end);
+        private void generateAdvancedLightningBolt(Vec3 start, Vec3 end, int chainLevel) {
+            // Generate more natural main path
+            List<Vec3> mainPath = generateNaturalLightningPath(start, end);
 
-            // Draw the main bolt with multiple layers for glow effect
-            drawBoltLayers(mainPath);
+            if (mainPath.size() < 2) return;
 
-            // Generate side branches
-            generateBranches(mainPath);
+            // Draw layered bolt for better visual effect
+            drawLayeredBolt(mainPath, chainLevel);
+
+            // Generate organic branches
+            generateOrganicBranches(mainPath, 0, chainLevel);
         }
 
-        private List<Vec3> generateZigzagPath(Vec3 start, Vec3 end) {
+        private List<Vec3> generateNaturalLightningPath(Vec3 start, Vec3 end) {
             List<Vec3> path = new ArrayList<>();
             path.add(start);
 
             Vec3 direction = end.subtract(start);
             double totalDistance = direction.length();
+
+            if (totalDistance < 0.1) {
+                path.add(end);
+                return path;
+            }
+
             direction = direction.normalize();
 
-            // Calculate number of segments based on distance
-            int segments = Math.max(1, (int)(totalDistance / MAX_SEGMENT_LENGTH));
+            // Calculate adaptive segment count based on distance
+            float segmentLength = MIN_SEGMENT_LENGTH + random.nextFloat() * (MAX_SEGMENT_LENGTH - MIN_SEGMENT_LENGTH);
+            int segments = Math.max(MIN_SEGMENTS, (int)(totalDistance / segmentLength));
+
+            // Create perpendicular vectors for deviation
+            Vec3 perpendicular1 = direction.cross(new Vec3(0, 1, 0));
+            if (perpendicular1.length() < 0.1) {
+                perpendicular1 = direction.cross(new Vec3(1, 0, 0));
+            }
+            perpendicular1 = perpendicular1.normalize();
+            Vec3 perpendicular2 = direction.cross(perpendicular1).normalize();
+
+            // Generate path with decreasing deviation and more natural curves
+            Vec3 currentDeviation = Vec3.ZERO;
 
             for (int i = 1; i < segments; i++) {
                 double t = (double) i / segments;
                 Vec3 basePoint = start.add(direction.scale(totalDistance * t));
 
-                // Add random deviation perpendicular to the main direction
-                Vec3 perpendicular1 = direction.cross(new Vec3(0, 1, 0));
-                if (perpendicular1.length() < 0.1) {
-                    perpendicular1 = direction.cross(new Vec3(1, 0, 0));
-                }
-                perpendicular1 = perpendicular1.normalize();
-                Vec3 perpendicular2 = direction.cross(perpendicular1).normalize();
+                // Calculate deviation that decreases as we approach the target
+                double deviationStrength = BASE_DEVIATION * Math.pow(DEVIATION_DECAY, t * 2);
 
-                double deviation1 = (random.nextDouble() - 0.5) * DEVIATION_STRENGTH * 2;
-                double deviation2 = (random.nextDouble() - 0.5) * DEVIATION_STRENGTH * 2;
-                double verticalDev = (random.nextDouble() - 0.5) * DEVIATION_STRENGTH;
+                // Add some continuity to the deviation (lightning tends to curve smoothly)
+                double momentum = 0.6; // How much previous deviation affects current
+                Vec3 newRandomDeviation = new Vec3(
+                        (random.nextDouble() - 0.5) * deviationStrength,
+                        (random.nextDouble() - 0.5) * deviationStrength * 0.7, // Less vertical deviation
+                        (random.nextDouble() - 0.5) * deviationStrength
+                );
 
+                currentDeviation = currentDeviation.scale(momentum).add(newRandomDeviation.scale(1 - momentum));
+
+                // Apply perpendicular deviation
                 Vec3 deviatedPoint = basePoint
-                        .add(perpendicular1.scale(deviation1))
-                        .add(perpendicular2.scale(deviation2))
-                        .add(0, verticalDev, 0);
+                        .add(perpendicular1.scale(currentDeviation.x))
+                        .add(perpendicular2.scale(currentDeviation.z))
+                        .add(0, currentDeviation.y, 0);
 
                 path.add(deviatedPoint);
             }
@@ -185,70 +211,112 @@ public class ElectricityRenderer {
             return path;
         }
 
-        private void drawBoltLayers(List<Vec3> path) {
-            // Draw outer glow (thick, transparent)
-            VectorRenderer.drawPolylineWorld(path, 0x44AADDFF, MAIN_BOLT_THICKNESS * 3, false, BOLT_LIFETIME, null);
+        private void drawLayeredBolt(List<Vec3> path, int chainLevel) {
+            if (path.size() < 2) return;
 
-            // Draw main bolt (medium thickness, bright)
-            VectorRenderer.drawPolylineWorld(path, MAIN_BOLT_COLOR, MAIN_BOLT_THICKNESS, false, BOLT_LIFETIME, null);
+            // Adjust thickness and brightness based on chain level
+            float thicknessMultiplier = 1.0f / (1.0f + chainLevel * 0.3f);
+            float brightnessMultiplier = 1.0f / (1.0f + chainLevel * 0.2f);
 
-            // Draw inner core (thin, white hot)
-            VectorRenderer.drawPolylineWorld(path, CORE_COLOR, MAIN_BOLT_THICKNESS * 0.3f, false, BOLT_LIFETIME, null);
+            // Draw multiple layers for realistic glow effect
+
+            // Outermost glow layer (very soft and wide)
+            int softGlow = adjustColorBrightness(GLOW_COLOR, brightnessMultiplier * 0.3f);
+            VectorRenderer.drawPolylineWorld(path, softGlow,
+                    GLOW_THICKNESS * thicknessMultiplier * 1.8f, false, BOLT_LIFETIME, null);
+
+            // Middle glow layer
+            int mediumGlow = adjustColorBrightness(OUTER_COLOR, brightnessMultiplier * 0.7f);
+            VectorRenderer.drawPolylineWorld(path, mediumGlow,
+                    GLOW_THICKNESS * thicknessMultiplier, false, BOLT_LIFETIME, null);
+
+            // Main bolt layer
+            int mainColor = adjustColorBrightness(INNER_COLOR, brightnessMultiplier);
+            VectorRenderer.drawPolylineWorld(path, mainColor,
+                    MAIN_BOLT_THICKNESS * thicknessMultiplier, false, BOLT_LIFETIME, null);
+
+            // Core layer (brightest, thinnest)
+            int coreColor = adjustColorBrightness(CORE_COLOR, brightnessMultiplier);
+            VectorRenderer.drawPolylineWorld(path, coreColor,
+                    MAIN_BOLT_THICKNESS * thicknessMultiplier * 0.4f, false, BOLT_LIFETIME, null);
         }
 
-        private void generateBranches(List<Vec3> mainPath) {
-            if (mainPath.size() < 2) return;
+        private void generateOrganicBranches(List<Vec3> mainPath, int depth, int chainLevel) {
+            if (depth >= MAX_BRANCH_DEPTH || mainPath.size() < 3) return;
 
             for (int i = 1; i < mainPath.size() - 1; i++) {
-                // Chance to spawn a branch at each segment
-                if (random.nextFloat() < 0.4f) { // 40% chance per segment
+                // Variable branch probability that decreases with depth and chain level
+                float branchChance = BRANCH_PROBABILITY * (1.0f / (1.0f + depth * 0.7f + chainLevel * 0.3f));
+
+                if (random.nextFloat() < branchChance) {
                     Vec3 branchStart = mainPath.get(i);
 
-                    // Generate random branch direction
+                    // Calculate main direction for reference
                     Vec3 mainDir = mainPath.get(i + 1).subtract(mainPath.get(i - 1)).normalize();
-                    Vec3 perpendicular = mainDir.cross(new Vec3(0, 1, 0));
-                    if (perpendicular.length() < 0.1) {
-                        perpendicular = mainDir.cross(new Vec3(1, 0, 0));
-                    }
-                    perpendicular = perpendicular.normalize();
 
-                    // Rotate perpendicular randomly
-                    double angle = random.nextDouble() * Math.PI * 2;
+                    // Create branch direction with more natural variation
+                    double branchAngle = (random.nextDouble() - 0.5) * Math.PI; // -90 to +90 degrees
+                    double branchElevation = (random.nextDouble() - 0.5) * Math.PI * 0.4; // Less vertical spread
+
                     Vec3 branchDir = new Vec3(
-                            perpendicular.x * Math.cos(angle) + mainDir.x * Math.sin(angle),
-                            perpendicular.y * Math.cos(angle) + mainDir.y * Math.sin(angle) + (random.nextDouble() - 0.5) * 0.5,
-                            perpendicular.z * Math.cos(angle) + mainDir.z * Math.sin(angle)
+                            Math.cos(branchAngle) * Math.cos(branchElevation),
+                            Math.sin(branchElevation),
+                            Math.sin(branchAngle) * Math.cos(branchElevation)
                     ).normalize();
 
-                    // Generate branch path
-                    double branchLength = 0.5 + random.nextDouble() * 1.5; // 0.5-2 blocks
+                    // Branch length decreases with depth
+                    double branchLength = (0.8 + random.nextDouble() * 1.0) * Math.pow(0.7, depth);
+
+                    // Generate shorter branch path
                     Vec3 branchEnd = branchStart.add(branchDir.scale(branchLength));
+                    List<Vec3> branchPath = generateNaturalLightningPath(branchStart, branchEnd);
 
-                    List<Vec3> branchPath = new ArrayList<>();
-                    branchPath.add(branchStart);
+                    if (branchPath.size() >= 2) {
+                        // Draw branch with reduced intensity
+                        drawBranchBolt(branchPath, depth, chainLevel);
 
-                    // Add 1-2 intermediate points for the branch
-                    int branchSegments = 1 + random.nextInt(2);
-                    for (int j = 1; j < branchSegments + 1; j++) {
-                        double t = (double) j / (branchSegments + 1);
-                        Vec3 point = branchStart.add(branchDir.scale(branchLength * t));
-
-                        // Add some randomness to branch segments
-                        point = point.add(
-                                (random.nextDouble() - 0.5) * 0.2,
-                                (random.nextDouble() - 0.5) * 0.2,
-                                (random.nextDouble() - 0.5) * 0.2
-                        );
-
-                        branchPath.add(point);
+                        // Recursive branching (with lower probability)
+                        if (depth < MAX_BRANCH_DEPTH - 1 && random.nextFloat() < 0.3f) {
+                            generateOrganicBranches(branchPath, depth + 1, chainLevel);
+                        }
                     }
-
-                    branchPath.add(branchEnd);
-
-                    // Draw the branch (thinner and more transparent)
-                    VectorRenderer.drawPolylineWorld(branchPath, BRANCH_COLOR, BRANCH_THICKNESS, false, BOLT_LIFETIME, null);
                 }
             }
+        }
+
+        private void drawBranchBolt(List<Vec3> path, int depth, int chainLevel) {
+            if (path.size() < 2) return;
+
+            float depthFade = (float) Math.pow(0.75, depth);
+            float chainFade = 1.0f / (1.0f + chainLevel * 0.2f);
+            float totalFade = depthFade * chainFade;
+
+            // Branches are thinner and dimmer
+            float branchThickness = BRANCH_THICKNESS * totalFade;
+
+            // Draw fewer layers for branches to maintain performance
+            int branchGlow = adjustColorBrightness(GLOW_COLOR, totalFade * 0.4f);
+            VectorRenderer.drawPolylineWorld(path, branchGlow,
+                    branchThickness * 2.0f, false, BOLT_LIFETIME, null);
+
+            int branchMain = adjustColorBrightness(BRANCH_COLOR, totalFade);
+            VectorRenderer.drawPolylineWorld(path, branchMain,
+                    branchThickness, false, BOLT_LIFETIME, null);
+        }
+
+        private int adjustColorBrightness(int color, float multiplier) {
+            int a = (color >> 24) & 0xFF;
+            int r = (color >> 16) & 0xFF;
+            int g = (color >> 8) & 0xFF;
+            int b = color & 0xFF;
+
+            // Apply brightness multiplier while preserving alpha
+            r = Math.min(255, (int)(r * multiplier));
+            g = Math.min(255, (int)(g * multiplier));
+            b = Math.min(255, (int)(b * multiplier));
+            a = Math.min(255, (int)(a * Math.min(1.0f, multiplier + 0.2f))); // Slightly less alpha reduction
+
+            return (a << 24) | (r << 16) | (g << 8) | b;
         }
     }
 }
