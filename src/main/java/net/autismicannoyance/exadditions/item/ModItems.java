@@ -145,6 +145,13 @@ public class ModItems {
     public static final RegistryObject<Item> ELECTRICITY_WAND = ITEMS.register("electric_wand",
             () -> new ElectricWandItem(
             ));
+    public static final RegistryObject<Item> VOID_PORTAL = ITEMS.register("void_portal",
+            () -> new VoidPortalItem(new Item.Properties()
+                    .stacksTo(1)
+                    .durability(10)
+                    .rarity(Rarity.EPIC)
+                    .fireResistant()
+            ));
 
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);

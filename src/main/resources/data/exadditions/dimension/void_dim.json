@@ -1,0 +1,11 @@
+{
+  "type": "exadditions:void_dim_type",
+  "generator": {
+    "type": "minecraft:flat",
+    "settings": {
+      "layers": [],
+      "structure_overrides": [],
+      "biome": "minecraft:the_void"
+    }
+  }
+}
