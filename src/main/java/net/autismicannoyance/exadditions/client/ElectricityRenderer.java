@@ -464,9 +464,9 @@ public class ElectricityRenderer {
 
             direction = direction.normalize();
 
-            // Calculate adaptive segment count based on distance
+            // Generate more segments for smoother curves
             float segmentLength = MIN_SEGMENT_LENGTH + random.nextFloat() * (MAX_SEGMENT_LENGTH - MIN_SEGMENT_LENGTH);
-            int segments = Math.max(MIN_SEGMENTS, (int)(totalDistance / segmentLength));
+            int segments = Math.max(MIN_SEGMENTS * 2, (int)(totalDistance / segmentLength)); // Double the segments
 
             // Create perpendicular vectors for deviation
             Vec3 perpendicular1 = direction.cross(new Vec3(0, 1, 0));
@@ -476,44 +476,33 @@ public class ElectricityRenderer {
             perpendicular1 = perpendicular1.normalize();
             Vec3 perpendicular2 = direction.cross(perpendicular1).normalize();
 
-            // Generate path with smooth curves and decreasing deviation
+            // Generate path with smoother curves and more natural deviation
             Vec3 currentDeviation = Vec3.ZERO;
-            Vec3 previousPoint = start;
 
             for (int i = 1; i < segments; i++) {
                 double t = (double) i / segments;
                 Vec3 basePoint = start.add(direction.scale(totalDistance * t));
 
-                // Smooth deviation that decreases towards target
-                double deviationStrength = BASE_DEVIATION * Math.pow(DEVIATION_DECAY, t * 1.5);
+                // Reduced deviation strength for smoother curves
+                double deviationStrength = BASE_DEVIATION * 0.6 * Math.pow(DEVIATION_DECAY, t * 2.0);
 
-                // Add momentum to create smoother, more natural curves
-                double momentum = 0.7;
+                // Higher momentum for smoother curves
+                double momentum = 0.85; // Increased from 0.7
                 Vec3 newRandomDeviation = new Vec3(
-                        (random.nextGaussian()) * deviationStrength * 0.8,
-                        (random.nextGaussian()) * deviationStrength * 0.5,
-                        (random.nextGaussian()) * deviationStrength * 0.8
+                        (random.nextGaussian()) * deviationStrength * 0.6, // Reduced chaos
+                        (random.nextGaussian()) * deviationStrength * 0.4,
+                        (random.nextGaussian()) * deviationStrength * 0.6
                 );
 
                 currentDeviation = currentDeviation.scale(momentum).add(newRandomDeviation.scale(1 - momentum));
 
-                // Apply perpendicular deviation with smoothing
+                // Apply perpendicular deviation
                 Vec3 deviatedPoint = basePoint
                         .add(perpendicular1.scale(currentDeviation.x))
                         .add(perpendicular2.scale(currentDeviation.z))
                         .add(0, currentDeviation.y, 0);
 
-                // Additional smoothing pass to reduce sharp angles
-                if (path.size() > 1) {
-                    Vec3 smoothingVector = previousPoint.subtract(path.get(path.size() - 2));
-                    if (smoothingVector.length() > 0) {
-                        smoothingVector = smoothingVector.normalize().scale(0.1 * deviationStrength);
-                        deviatedPoint = deviatedPoint.add(smoothingVector);
-                    }
-                }
-
                 path.add(deviatedPoint);
-                previousPoint = deviatedPoint;
             }
 
             path.add(end);
