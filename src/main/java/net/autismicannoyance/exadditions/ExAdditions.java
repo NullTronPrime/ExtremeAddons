@@ -1,12 +1,14 @@
 package net.autismicannoyance.exadditions;
 
 import net.autismicannoyance.exadditions.command.BlackHoleCommand;
+import net.autismicannoyance.exadditions.command.ResetVoidCommand;
 import net.autismicannoyance.exadditions.command.TestRenderCommand;
 import net.autismicannoyance.exadditions.effect.ModEffects;
 import net.autismicannoyance.exadditions.enchantment.ModEnchantments;
 import net.autismicannoyance.exadditions.network.ModNetworking;
 import net.autismicannoyance.exadditions.potion.ModPotions;
 import net.autismicannoyance.exadditions.util.ModBrewingRecipes;
+import net.autismicannoyance.exadditions.world.dimension.ModChunkGenerators;
 import net.minecraft.client.renderer.item.ItemProperties;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -50,6 +52,7 @@ public class ExAdditions {
         ModEffects.register(modEventBus);
         ModPotions.register(modEventBus);
         ModDimensions.register();
+        ModChunkGenerators.register(modEventBus);
 
 
         modEventBus.addListener(this::commonSetup);
@@ -83,6 +86,7 @@ public class ExAdditions {
     @SubscribeEvent
     public void onRegisterCommands(RegisterCommandsEvent event) {
         BlackHoleCommand.register(event.getDispatcher());
+        ResetVoidCommand.register(event.getDispatcher());
         //TestRenderCommand.register(event.getDispatcher()); // Uncomment if needed
     }
 

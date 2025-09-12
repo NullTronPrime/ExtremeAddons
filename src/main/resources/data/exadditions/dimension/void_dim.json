@@ -1,10 +1,10 @@
 {
   "type": "exadditions:void_dim_type",
   "generator": {
-    "type": "minecraft:flat",
-    "settings": {
-      "layers": [],
-      "structure_overrides": [],
+    "type": "exadditions:void_chunk_generator",
+    "seed": 12345,
+    "biome_source": {
+      "type": "minecraft:fixed",
       "biome": "minecraft:the_void"
     }
   }
