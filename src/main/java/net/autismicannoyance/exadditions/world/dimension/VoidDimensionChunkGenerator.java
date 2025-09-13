@@ -38,6 +38,11 @@ public class VoidDimensionChunkGenerator extends ChunkGenerator {
     private final long seed;
     private static final int SAMPLE_RATE = 4;
     private static final int BASE_HEIGHT = 80;
+    private static final int LAKE_SAMPLE_RATE = 2;
+
+    // Lake generation parameters
+    private static final double LAKE_THRESHOLD = 0.2;
+    private static final int LAKE_DEPTH = 6; // Make lakes deeper and more visible
 
     public VoidDimensionChunkGenerator(BiomeSource biomeSource, long seed) {
         super(biomeSource);
@@ -60,15 +65,22 @@ public class VoidDimensionChunkGenerator extends ChunkGenerator {
         int minY = chunk.getMinBuildHeight();
         int maxY = chunk.getMaxBuildHeight();
 
-        double[][] heightSamples = generateHeightSamples(chunkPos);
-        double[][] lavaSamples = generateLavaSamples(chunkPos);
+        // Generate base terrain height samples
+        double[][] baseHeightSamples = generateBaseHeightSamples(chunkPos);
 
+        // Generate lake mask - which areas should be lakes
+        boolean[][] lakeMask = generateLakeMask(chunkPos);
+
+        // Generate final height incorporating lakes
+        double[][] finalHeights = generateFinalHeights(baseHeightSamples, lakeMask, chunkPos);
+
+        // Generate terrain for each column
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
-                double height = bilinearInterpolate(heightSamples, x, z);
-                double lavaFactor = bilinearInterpolate(lavaSamples, x, z);
+                double terrainHeight = bilinearInterpolate(finalHeights, x, z, SAMPLE_RATE);
+                boolean isLake = bilinearInterpolateLakeMask(lakeMask, x, z, LAKE_SAMPLE_RATE);
 
-                generateColumn(chunk, x, z, (int) height, lavaFactor, minY, maxY, chunkPos);
+                generateColumn(chunk, x, z, (int) terrainHeight, isLake, minY, maxY, chunkPos);
             }
         }
     }
@@ -82,7 +94,10 @@ public class VoidDimensionChunkGenerator extends ChunkGenerator {
         return 63;
     }
 
-    private double[][] generateHeightSamples(ChunkPos chunkPos) {
+    /**
+     * Generates the base terrain without lakes
+     */
+    private double[][] generateBaseHeightSamples(ChunkPos chunkPos) {
         int samples = (16 / SAMPLE_RATE) + 1;
         double[][] heights = new double[samples][samples];
 
@@ -103,25 +118,69 @@ public class VoidDimensionChunkGenerator extends ChunkGenerator {
         return heights;
     }
 
-    private double[][] generateLavaSamples(ChunkPos chunkPos) {
-        int samples = (16 / SAMPLE_RATE) + 1;
-        double[][] lava = new double[samples][samples];
+    /**
+     * Generates a mask indicating where lakes should be
+     */
+    private boolean[][] generateLakeMask(ChunkPos chunkPos) {
+        int samples = (16 / LAKE_SAMPLE_RATE) + 1;
+        boolean[][] lakeMask = new boolean[samples][samples];
 
         for (int i = 0; i < samples; i++) {
             for (int j = 0; j < samples; j++) {
-                int worldX = chunkPos.getMinBlockX() + (i * SAMPLE_RATE);
-                int worldZ = chunkPos.getMinBlockZ() + (j * SAMPLE_RATE);
+                int worldX = chunkPos.getMinBlockX() + (i * LAKE_SAMPLE_RATE);
+                int worldZ = chunkPos.getMinBlockZ() + (j * LAKE_SAMPLE_RATE);
 
-                double lavaLakes = simplexNoise(worldX * 0.01, worldZ * 0.01, seed + 5000);
-                lava[i][j] = lavaLakes;
+                // Large scale lake placement - bigger lakes
+                double lakeNoise = simplexNoise(worldX * 0.006, worldZ * 0.006, seed + 5000);
+
+                // Shape variation for more organic lakes
+                double shapeNoise = simplexNoise(worldX * 0.012, worldZ * 0.012, seed + 6000);
+
+                // Combine for final lake determination
+                double combinedNoise = (lakeNoise + shapeNoise * 0.3) / 1.3;
+
+                lakeMask[i][j] = combinedNoise > LAKE_THRESHOLD;
             }
         }
-        return lava;
+        return lakeMask;
     }
 
-    private double bilinearInterpolate(double[][] samples, int x, int z) {
-        double fx = (double) x / SAMPLE_RATE;
-        double fz = (double) z / SAMPLE_RATE;
+    /**
+     * Generates final terrain heights, carving out lake basins where needed
+     */
+    private double[][] generateFinalHeights(double[][] baseHeights, boolean[][] lakeMask, ChunkPos chunkPos) {
+        int samples = baseHeights.length;
+        double[][] finalHeights = new double[samples][samples];
+
+        for (int i = 0; i < samples; i++) {
+            for (int j = 0; j < samples; j++) {
+                double baseHeight = baseHeights[i][j];
+
+                // Check if this point should be a lake
+                boolean shouldBeLake = false;
+                if (i < lakeMask.length && j < lakeMask[0].length) {
+                    shouldBeLake = lakeMask[i][j];
+                }
+
+                if (shouldBeLake) {
+                    // Carve out a lake basin - lower the terrain
+                    finalHeights[i][j] = baseHeight - LAKE_DEPTH;
+                } else {
+                    // Normal terrain height
+                    finalHeights[i][j] = baseHeight;
+                }
+            }
+        }
+
+        return finalHeights;
+    }
+
+    /**
+     * Performs bilinear interpolation on height samples
+     */
+    private double bilinearInterpolate(double[][] samples, int x, int z, int sampleRate) {
+        double fx = (double) x / sampleRate;
+        double fz = (double) z / sampleRate;
 
         int x1 = (int) Math.floor(fx);
         int z1 = (int) Math.floor(fz);
@@ -142,36 +201,71 @@ public class VoidDimensionChunkGenerator extends ChunkGenerator {
         return c0 * (1 - dz) + c1 * dz;
     }
 
-    private void generateColumn(ChunkAccess chunk, int x, int z, int terrainHeight, double lavaFactor,
+    /**
+     * Performs bilinear interpolation on lake mask
+     */
+    private boolean bilinearInterpolateLakeMask(boolean[][] samples, int x, int z, int sampleRate) {
+        double fx = (double) x / sampleRate;
+        double fz = (double) z / sampleRate;
+
+        int x1 = (int) Math.floor(fx);
+        int z1 = (int) Math.floor(fz);
+        int x2 = Math.min(x1 + 1, samples.length - 1);
+        int z2 = Math.min(z1 + 1, samples[0].length - 1);
+
+        // If any of the 4 corner samples are lake, consider this a lake area
+        boolean c00 = samples[x1][z1];
+        boolean c10 = samples[x2][z1];
+        boolean c01 = samples[x1][z2];
+        boolean c11 = samples[x2][z2];
+
+        // Lake if any corner is lake (this creates slightly larger, more connected lakes)
+        return c00 || c10 || c01 || c11;
+    }
+
+    /**
+     * Generates a single column of terrain
+     */
+    private void generateColumn(ChunkAccess chunk, int x, int z, int terrainHeight, boolean isLake,
                                 int minY, int maxY, ChunkPos chunkPos) {
         int worldX = chunkPos.getMinBlockX() + x;
         int worldZ = chunkPos.getMinBlockZ() + z;
         RandomSource random = RandomSource.create(hash2D(worldX, worldZ, seed));
 
-        boolean isLavaLake = lavaFactor > 0.3;
-        int lavaLevel = isLavaLake ? terrainHeight - random.nextInt(10, 25) : -1;
-
         for (int y = minY; y <= maxY; y++) {
             BlockPos pos = new BlockPos(x, y, z);
+            BlockState blockToPlace = Blocks.AIR.defaultBlockState();
 
             if (y <= terrainHeight) {
-                boolean isCave = shouldGenerateCave(worldX, y, worldZ, terrainHeight);
+                if (isLake) {
+                    // In a lake basin - fill with lava above the lake floor
+                    int lakeFloor = terrainHeight;
+                    int lakeTop = lakeFloor + LAKE_DEPTH; // Fill the carved basin with lava
 
-                if (isCave && y < terrainHeight - 2) {
-                    if (isLavaLake && y <= lavaLevel) {
-                        chunk.setBlockState(pos, Blocks.LAVA.defaultBlockState(), false);
-                    } else {
-                        chunk.setBlockState(pos, Blocks.AIR.defaultBlockState(), false);
+                    if (y <= lakeFloor) {
+                        // Lake floor - solid obsidian
+                        blockToPlace = Blocks.OBSIDIAN.defaultBlockState();
+                    } else if (y <= lakeTop) {
+                        // Lake water level - fill with lava
+                        blockToPlace = Blocks.LAVA.defaultBlockState();
                     }
                 } else {
-                    chunk.setBlockState(pos, Blocks.OBSIDIAN.defaultBlockState(), false);
+                    // Regular terrain generation
+                    boolean isCave = shouldGenerateCave(worldX, y, worldZ, terrainHeight);
+
+                    if (isCave && y < terrainHeight - 2) {
+                        blockToPlace = Blocks.AIR.defaultBlockState();
+                    } else {
+                        blockToPlace = Blocks.OBSIDIAN.defaultBlockState();
+                    }
                 }
-            } else if (isLavaLake && y <= lavaLevel) {
-                chunk.setBlockState(pos, Blocks.LAVA.defaultBlockState(), false);
             }
+
+            chunk.setBlockState(pos, blockToPlace, false);
         }
 
-        if (random.nextFloat() < 0.003f && terrainHeight + 1 <= maxY) {
+        // Occasional surface lava drops (only on non-lake terrain)
+        if (!isLake && random.nextFloat() < 0.003f && terrainHeight + 1 <= maxY) {
             chunk.setBlockState(new BlockPos(x, terrainHeight + 1, z), Blocks.LAVA.defaultBlockState(), false);
         }
     }
@@ -290,7 +384,7 @@ public class VoidDimensionChunkGenerator extends ChunkGenerator {
 
     @Override
     public void addDebugScreenInfo(List<String> info, RandomState randomState, BlockPos pos) {
-        info.add("VoidDim Jagged Obsidian Generator");
+        info.add("VoidDim Generator with Proper Lava Lake Basins");
     }
 
     @Override
@@ -300,6 +394,6 @@ public class VoidDimensionChunkGenerator extends ChunkGenerator {
 
     @Override
     public int getGenDepth() {
-        return 256;
+        return 256; // Standard generation depth
     }
 }
