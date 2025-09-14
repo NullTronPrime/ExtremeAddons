@@ -41,7 +41,7 @@ public final class ModNetworking {
         CHANNEL.registerMessage(id(), EyeEffectPacket.class,
                 EyeEffectPacket::encode, EyeEffectPacket::decode, EyeEffectPacket::handle);
 
-             // Black hole effect packet - send from server to clients to spawn black hole visuals
+        // Black hole effect packet - send from server to clients to spawn black hole visuals
         CHANNEL.registerMessage(id(), BlackHoleEffectPacket.class,
                 BlackHoleEffectPacket::encode, BlackHoleEffectPacket::decode, BlackHoleEffectPacket::handle);
 
@@ -67,6 +67,10 @@ public final class ModNetworking {
         //elec pac
         CHANNEL.registerMessage(id(), ElectricityPacket.class,
                 ElectricityPacket::encode, ElectricityPacket::decode, ElectricityPacket::handle);
+
+        // Adaptation wheel packet - send from server to clients for wheel rotation effects
+        CHANNEL.registerMessage(id(), AdaptationWheelPacket.class,
+                AdaptationWheelPacket::encode, AdaptationWheelPacket::decode, AdaptationWheelPacket::handle);
 
     }
 

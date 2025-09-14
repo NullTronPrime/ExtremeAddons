@@ -5,15 +5,22 @@ import net.autismicannoyance.exadditions.command.ResetVoidCommand;
 import net.autismicannoyance.exadditions.command.TestRenderCommand;
 import net.autismicannoyance.exadditions.effect.ModEffects;
 import net.autismicannoyance.exadditions.enchantment.ModEnchantments;
+import net.autismicannoyance.exadditions.entity.ModEntities;
+import net.autismicannoyance.exadditions.entity.ModEntityDataSerializers;
+import net.autismicannoyance.exadditions.entity.client.PlayerlikeRenderer;
+import net.autismicannoyance.exadditions.entity.custom.PlayerlikeEntity;
 import net.autismicannoyance.exadditions.network.ModNetworking;
 import net.autismicannoyance.exadditions.potion.ModPotions;
 import net.autismicannoyance.exadditions.util.ModBrewingRecipes;
 import net.autismicannoyance.exadditions.world.dimension.ModChunkGenerators;
-import net.minecraft.client.renderer.item.ItemProperties;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.client.renderer.entity.EntityRenderers;
+import net.minecraft.core.BlockPos;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.MobSpawnType;
+import net.minecraft.world.entity.SpawnPlacements;
+import net.minecraft.world.level.ServerLevelAccessor;
+import net.minecraft.world.level.levelgen.Heightmap;
 import com.mojang.logging.LogUtils;
 import net.autismicannoyance.exadditions.block.ModBlocks;
 import net.autismicannoyance.exadditions.item.ModCreativeModeTabs;
@@ -23,6 +30,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.entity.EntityAttributeCreationEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -54,20 +62,31 @@ public class ExAdditions {
         ModDimensions.register();
         ModChunkGenerators.register(modEventBus);
 
+        // Register entities
+        ModEntities.register(modEventBus);
+        ModEntityDataSerializers.register(modEventBus);
 
         modEventBus.addListener(this::commonSetup);
+        modEventBus.addListener(this::addCreative);
+        modEventBus.addListener(this::onAttributeCreate);
 
         MinecraftForge.EVENT_BUS.register(this);
-
-        modEventBus.addListener(this::addCreative);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
         // Register brewing recipes
         ModBrewingRecipes.registerBrewingRecipes(event);
 
-        // 👇 Register networking (very important!)
+        // Register networking (very important!)
         event.enqueueWork(ModNetworking::register);
+
+        // Register spawn placements
+        event.enqueueWork(() -> {
+            SpawnPlacements.register(ModEntities.PLAYERLIKE.get(),
+                    SpawnPlacements.Type.ON_GROUND,
+                    Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    (EntityType<PlayerlikeEntity> entityType, ServerLevelAccessor level, MobSpawnType spawnType, BlockPos pos, RandomSource random) -> true);
+        });
     }
 
     private void addCreative(BuildCreativeModeTabContentsEvent event) {
@@ -90,7 +109,16 @@ public class ExAdditions {
         //TestRenderCommand.register(event.getDispatcher()); // Uncomment if needed
     }
 
+    public void onAttributeCreate(EntityAttributeCreationEvent event) {
+        event.put(ModEntities.PLAYERLIKE.get(), PlayerlikeEntity.createAttributes().build());
+    }
+
     @Mod.EventBusSubscriber(modid = MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
     public static class ClientModEvents {
+
+        @SubscribeEvent
+        public static void onClientSetup(FMLClientSetupEvent event) {
+            EntityRenderers.register(ModEntities.PLAYERLIKE.get(), PlayerlikeRenderer::new);
+        }
     }
 }

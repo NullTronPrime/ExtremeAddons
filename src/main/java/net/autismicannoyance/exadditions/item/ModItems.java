@@ -1,8 +1,10 @@
 package net.autismicannoyance.exadditions.item;
 
 import net.autismicannoyance.exadditions.ExAdditions;
+import net.autismicannoyance.exadditions.entity.ModEntities;
 import net.autismicannoyance.exadditions.item.custom.*;
 import net.minecraft.world.item.*;
+import net.minecraftforge.common.ForgeSpawnEggItem;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -152,6 +154,9 @@ public class ModItems {
                     .rarity(Rarity.EPIC)
                     .fireResistant()
             ));
+    public static final RegistryObject<Item> PLAYERLIKE_SPAWN_EGG = ITEMS.register("playerlike_spawn_egg",
+            () -> new ForgeSpawnEggItem(ModEntities.PLAYERLIKE, 0x7e9680, 0xc5d1c5, new Item.Properties()));
+
 
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);

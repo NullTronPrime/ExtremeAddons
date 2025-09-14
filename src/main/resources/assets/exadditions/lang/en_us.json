@@ -125,5 +125,9 @@
   "item.exadditions.sapphire_pickaxe": "Sapphire Pickaxe",
   "item.exadditions.sapphire_axe": "Sapphire Axe",
   "item.exadditions.sapphire_shovel": "Sapphire Shovel",
-  "item.exadditions.sapphire_hoe": "Sapphire Hoe"
+  "item.exadditions.sapphire_hoe": "Sapphire Hoe",
+
+
+  "entity.exadditions.playerlike": "Playerlike",
+  "item.exadditions.playerlike_spawn_egg": "Playerlike Spawn Egg"
 }
