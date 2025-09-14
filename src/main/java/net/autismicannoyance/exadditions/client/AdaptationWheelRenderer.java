@@ -11,6 +11,8 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.ArrayList;
+import java.util.List;
 
 @Mod.EventBusSubscriber(modid = ExAdditions.MOD_ID, value = Dist.CLIENT)
 public class AdaptationWheelRenderer {
@@ -44,14 +46,14 @@ public class AdaptationWheelRenderer {
 
             Entity entity = mc.level.getEntity(entityId);
             if (entity instanceof PlayerlikeEntity playerlikeEntity) {
-                renderAdaptationWheel(playerlikeEntity, data, partialTick, event);
+                renderAdaptationWheel(playerlikeEntity, data, partialTick);
             }
         }
     }
 
-    private static void renderAdaptationWheel(PlayerlikeEntity entity, WheelData data, float partialTick, RenderLevelStageEvent event) {
+    private static void renderAdaptationWheel(PlayerlikeEntity entity, WheelData data, float partialTick) {
         // Smooth rotation interpolation
-        float deltaTime = partialTick * 0.05f; // Adjust speed as needed
+        float deltaTime = partialTick * 0.05f;
         float rotationDiff = data.targetRotation - data.currentRotation;
 
         // Handle rotation wrapping (shortest path)
@@ -61,86 +63,82 @@ public class AdaptationWheelRenderer {
             rotationDiff += 360.0f;
         }
 
-        data.currentRotation += rotationDiff * deltaTime * 10.0f; // Smooth interpolation
+        data.currentRotation += rotationDiff * deltaTime * 10.0f;
         if (data.currentRotation >= 360.0f) data.currentRotation -= 360.0f;
         if (data.currentRotation < 0.0f) data.currentRotation += 360.0f;
 
-        // Get entity position
-        Vec3 entityPos = entity.position();
-        Vec3 wheelCenter = entityPos.add(0, entity.getBbHeight() + 0.8, 0); // Above the entity
+        // Get entity position and create wheel center above entity
+        Vec3 wheelCenter = entity.position().add(0, entity.getBbHeight() + 0.8, 0);
 
         // Determine wheel color based on resistance level
         int wheelColor = getWheelColor(data.resistanceLevel);
 
-        // Render the main wheel circle
-        renderWheelCircle(wheelCenter, 1.0f, wheelColor, data.currentRotation);
-
-        // Render the spokes
-        renderWheelSpokes(wheelCenter, 1.0f, wheelColor, data.currentRotation);
-
-        // Render the center hub
-        VectorRenderer.drawSphereWorld(wheelCenter, 0.1f, wheelColor, 8, 12, false, -1,
-                VectorRenderer.Transform.IDENTITY);
-
-        // Render outer nodes
-        renderWheelNodes(wheelCenter, 1.0f, wheelColor, data.currentRotation);
+        // Create the wheel structure using world coordinates
+        renderWheelStructure(wheelCenter, 1.0f, wheelColor, data.currentRotation);
     }
 
-    private static void renderWheelCircle(Vec3 center, float radius, int color, float rotation) {
-        // Draw main circle using line segments
-        int segments = 32;
-        for (int i = 0; i < segments; i++) {
-            double angle1 = (i * 2.0 * Math.PI) / segments;
-            double angle2 = ((i + 1) * 2.0 * Math.PI) / segments;
+    private static void renderWheelStructure(Vec3 center, float radius, int color, float rotation) {
+        float rotationRad = (float) Math.toRadians(rotation);
 
-            Vec3 p1 = center.add(
-                    Math.cos(angle1) * radius,
-                    0,
-                    Math.sin(angle1) * radius
-            );
+        // Create outer rim using connected line segments (vertical wheel)
+        int rimSegments = 32;
+        List<Vec3> rimPoints = new ArrayList<>();
 
-            Vec3 p2 = center.add(
-                    Math.cos(angle2) * radius,
-                    0,
-                    Math.sin(angle2) * radius
-            );
+        for (int i = 0; i <= rimSegments; i++) {
+            double angle = (i * 2.0 * Math.PI) / rimSegments;
+            // Create vertical wheel by using X-Z plane rotated by current rotation
+            double x = Math.cos(angle) * radius;
+            double z = Math.sin(angle) * radius;
 
-            VectorRenderer.drawLineWorld(p1, p2, color, 0.05f, false, -1,
-                    VectorRenderer.Transform.IDENTITY);
+            // Apply rotation around Y axis
+            double rotatedX = x * Math.cos(rotationRad) - z * Math.sin(rotationRad);
+            double rotatedZ = x * Math.sin(rotationRad) + z * Math.cos(rotationRad);
+
+            Vec3 point = center.add(rotatedX, 0, rotatedZ);
+            rimPoints.add(point);
         }
-    }
 
-    private static void renderWheelSpokes(Vec3 center, float radius, int color, float rotation) {
-        // Draw 8 spokes from center to edge
-        int spokes = 8;
-        for (int i = 0; i < spokes; i++) {
-            double angle = (i * 2.0 * Math.PI) / spokes + Math.toRadians(rotation);
-
-            Vec3 edgePoint = center.add(
-                    Math.cos(angle) * radius,
-                    0,
-                    Math.sin(angle) * radius
-            );
-
-            VectorRenderer.drawLineWorld(center, edgePoint, color, 0.04f, false, -1,
-                    VectorRenderer.Transform.IDENTITY);
+        // Draw rim segments
+        for (int i = 0; i < rimPoints.size() - 1; i++) {
+            VectorRenderer.drawLineWorld(rimPoints.get(i), rimPoints.get(i + 1),
+                    color, 0.08f, false, 3, VectorRenderer.Transform.IDENTITY);
         }
-    }
 
-    private static void renderWheelNodes(Vec3 center, float radius, int color, float rotation) {
-        // Draw nodes at the edge of the wheel
-        int nodes = 8;
-        for (int i = 0; i < nodes; i++) {
-            double angle = (i * 2.0 * Math.PI) / nodes + Math.toRadians(rotation);
+        // Draw spokes (8 spokes from center to rim)
+        int spokeCount = 8;
+        for (int i = 0; i < spokeCount; i++) {
+            double angle = (i * 2.0 * Math.PI) / spokeCount;
+            double x = Math.cos(angle) * radius;
+            double z = Math.sin(angle) * radius;
 
-            Vec3 nodePos = center.add(
-                    Math.cos(angle) * radius,
-                    0,
-                    Math.sin(angle) * radius
-            );
+            // Apply rotation
+            double rotatedX = x * Math.cos(rotationRad) - z * Math.sin(rotationRad);
+            double rotatedZ = x * Math.sin(rotationRad) + z * Math.cos(rotationRad);
 
-            VectorRenderer.drawSphereWorld(nodePos, 0.08f, color, 6, 8, false, -1,
-                    VectorRenderer.Transform.IDENTITY);
+            Vec3 spokeEnd = center.add(rotatedX, 0, rotatedZ);
+
+            VectorRenderer.drawLineWorld(center, spokeEnd,
+                    color, 0.06f, false, 3, VectorRenderer.Transform.IDENTITY);
+        }
+
+        // Draw center hub
+        VectorRenderer.drawSphereWorld(center, 0.12f, color, 8, 12,
+                false, 3, VectorRenderer.Transform.IDENTITY);
+
+        // Draw nodes at rim intersections
+        for (int i = 0; i < spokeCount; i++) {
+            double angle = (i * 2.0 * Math.PI) / spokeCount;
+            double x = Math.cos(angle) * radius;
+            double z = Math.sin(angle) * radius;
+
+            // Apply rotation
+            double rotatedX = x * Math.cos(rotationRad) - z * Math.sin(rotationRad);
+            double rotatedZ = x * Math.sin(rotationRad) + z * Math.cos(rotationRad);
+
+            Vec3 nodePos = center.add(rotatedX, 0, rotatedZ);
+
+            VectorRenderer.drawSphereWorld(nodePos, 0.1f, color, 6, 8,
+                    false, 3, VectorRenderer.Transform.IDENTITY);
         }
     }
 

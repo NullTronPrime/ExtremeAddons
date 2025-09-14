@@ -8,15 +8,18 @@ import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.BossEvent;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.ai.goal.FloatGoal;
-import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
-import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.ai.goal.*;
+import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
+import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
+import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.network.PacketDistributor;
@@ -24,7 +27,7 @@ import net.minecraftforge.network.PacketDistributor;
 import java.util.HashMap;
 import java.util.Map;
 
-public class PlayerlikeEntity extends Mob {
+public class PlayerlikeEntity extends Monster {
 
     private static final EntityDataAccessor<Float> WHEEL_ROTATION = SynchedEntityData.defineId(PlayerlikeEntity.class, EntityDataSerializers.FLOAT);
 
@@ -35,7 +38,7 @@ public class PlayerlikeEntity extends Mob {
     // Boss bar
     private ServerBossEvent bossEvent;
 
-    public PlayerlikeEntity(EntityType<? extends Mob> entityType, Level level) {
+    public PlayerlikeEntity(EntityType<? extends Monster> entityType, Level level) {
         super(entityType, level);
 
         // Initialize boss bar on server side
@@ -54,18 +57,28 @@ public class PlayerlikeEntity extends Mob {
 
     @Override
     protected void registerGoals() {
+        // Combat goals
         this.goalSelector.addGoal(0, new FloatGoal(this));
-        this.goalSelector.addGoal(2, new LookAtPlayerGoal(this, Player.class, 8.0F));
-        this.goalSelector.addGoal(3, new RandomLookAroundGoal(this));
+        this.goalSelector.addGoal(1, new MeleeAttackGoal(this, 1.2D, false));
+        this.goalSelector.addGoal(2, new WaterAvoidingRandomStrollGoal(this, 1.0D));
+        this.goalSelector.addGoal(3, new LookAtPlayerGoal(this, Player.class, 8.0F));
+        this.goalSelector.addGoal(4, new RandomLookAroundGoal(this));
+
+        // Targeting goals - makes it hostile
+        this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
+        this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(this, Player.class, true));
+        this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, LivingEntity.class, 10, true, false,
+                entity -> entity instanceof LivingEntity && !(entity instanceof PlayerlikeEntity)));
     }
 
     public static AttributeSupplier.Builder createAttributes() {
-        return Mob.createMobAttributes()
-                .add(Attributes.MAX_HEALTH, 100.0D)
-                .add(Attributes.MOVEMENT_SPEED, 0.25D)
-                .add(Attributes.ARMOR_TOUGHNESS, 0.0D)
-                .add(Attributes.ATTACK_KNOCKBACK, 0.0D)
-                .add(Attributes.ATTACK_DAMAGE, 2.0D);
+        return Monster.createMonsterAttributes()
+                .add(Attributes.MAX_HEALTH, 150.0D) // Increased health for boss
+                .add(Attributes.MOVEMENT_SPEED, 0.3D) // Slightly faster
+                .add(Attributes.ARMOR_TOUGHNESS, 2.0D) // Some armor toughness
+                .add(Attributes.ATTACK_KNOCKBACK, 1.0D) // Knockback on attacks
+                .add(Attributes.ATTACK_DAMAGE, 14.0D) // 14 damage as requested
+                .add(Attributes.FOLLOW_RANGE, 32.0D); // Larger detection range
     }
 
     @Override
@@ -77,16 +90,19 @@ public class PlayerlikeEntity extends Mob {
             int hitCount = damageHitCounts.getOrDefault(damageType, 0) + 1;
             damageHitCounts.put(damageType, hitCount);
 
-            // Calculate resistance based on hit count
+            // Calculate resistance based on hit count (faster adaptation for boss)
             float resistance = 0.0F;
-            if (hitCount >= 4) {
-                resistance = 0.5F; // 50% resistance
+            if (hitCount >= 3) {
+                resistance = 0.4F; // 40% resistance after 3 hits
             }
-            if (hitCount >= 6) {
-                resistance = 0.75F; // 75% resistance
+            if (hitCount >= 5) {
+                resistance = 0.7F; // 70% resistance after 5 hits
             }
             if (hitCount >= 7) {
-                resistance = 1.0F; // Full immunity
+                resistance = 0.9F; // 90% resistance after 7 hits
+            }
+            if (hitCount >= 10) {
+                resistance = 1.0F; // Full immunity after 10 hits
             }
 
             // Update resistance map
@@ -104,11 +120,32 @@ public class PlayerlikeEntity extends Mob {
             ModNetworking.CHANNEL.send(PacketDistributor.TRACKING_ENTITY.with(() -> this),
                     new AdaptationWheelPacket(this.getId(), newRotation, resistance));
 
+            // Become more aggressive when adapted (speed boost)
+            if (resistance > 0.5F) {
+                this.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.35D);
+                this.getAttribute(Attributes.ATTACK_DAMAGE).setBaseValue(16.0D); // Even more damage when adapted
+            }
+
             // Call parent with modified damage
             return super.hurt(damageSource, finalDamage);
         }
 
         return super.hurt(damageSource, amount);
+    }
+
+    @Override
+    protected SoundEvent getAmbientSound() {
+        return SoundEvents.ZOMBIE_AMBIENT;
+    }
+
+    @Override
+    protected SoundEvent getHurtSound(DamageSource damageSource) {
+        return SoundEvents.ZOMBIE_HURT;
+    }
+
+    @Override
+    protected SoundEvent getDeathSound() {
+        return SoundEvents.ZOMBIE_DEATH;
     }
 
     @Override
@@ -118,6 +155,15 @@ public class PlayerlikeEntity extends Mob {
         // Update boss bar
         if (!this.level().isClientSide && this.bossEvent != null) {
             this.bossEvent.setProgress(this.getHealth() / this.getMaxHealth());
+        }
+
+        // Aggressive behavior - target nearby entities more actively
+        if (!this.level().isClientSide && this.getTarget() == null && this.tickCount % 20 == 0) {
+            // Look for players nearby every second
+            Player nearestPlayer = this.level().getNearestPlayer(this.getX(), this.getY(), this.getZ(), 16.0D, false);
+            if (nearestPlayer != null && !nearestPlayer.isCreative() && !nearestPlayer.isSpectator()) {
+                this.setTarget(nearestPlayer);
+            }
         }
     }
 
@@ -187,5 +233,11 @@ public class PlayerlikeEntity extends Mob {
         if (this.bossEvent != null) {
             this.bossEvent.removeAllPlayers();
         }
+    }
+
+    // Override to make it always hostile
+    @Override
+    public boolean isPreventingPlayerRest(Player player) {
+        return true;
     }
 }
