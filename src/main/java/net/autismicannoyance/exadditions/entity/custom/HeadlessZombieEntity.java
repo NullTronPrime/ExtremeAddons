@@ -12,6 +12,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.MobSpawnType;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.*;
@@ -33,6 +34,7 @@ public class HeadlessZombieEntity extends Zombie {
 
     public static final EntityDataAccessor<Integer> DEATH_COUNT = SynchedEntityData.defineId(HeadlessZombieEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<String> LAST_DEATH_SOURCE = SynchedEntityData.defineId(HeadlessZombieEntity.class, EntityDataSerializers.STRING);
+    public static final EntityDataAccessor<Integer> SPAWN_TYPE = SynchedEntityData.defineId(HeadlessZombieEntity.class, EntityDataSerializers.INT);
 
     // Damage resistance tracking - maps damage source to resistance level (0.0 to 0.9)
     private final Map<String, Float> damageResistances = new HashMap<>();
@@ -58,6 +60,7 @@ public class HeadlessZombieEntity extends Zombie {
         super.defineSynchedData();
         this.entityData.define(DEATH_COUNT, 0);
         this.entityData.define(LAST_DEATH_SOURCE, "");
+        this.entityData.define(SPAWN_TYPE, MobSpawnType.COMMAND.ordinal()); // Default to command spawn
     }
 
     @Override
@@ -78,6 +81,11 @@ public class HeadlessZombieEntity extends Zombie {
                 .add(Attributes.ATTACK_DAMAGE, BASE_DAMAGE)
                 .add(Attributes.FOLLOW_RANGE, 128.0D) // Large follow range for infinite tracking
                 .add(Attributes.KNOCKBACK_RESISTANCE, 1.0D); // Cannot be knocked back
+    }
+
+    // Method to set spawn type - call this when spawning
+    public void setSpawnType(MobSpawnType spawnType) {
+        this.entityData.set(SPAWN_TYPE, spawnType.ordinal());
     }
 
     @Override
@@ -237,6 +245,9 @@ public class HeadlessZombieEntity extends Zombie {
                 // Restore saved data
                 newZombie.readAdditionalSaveData(zombieData);
 
+                // Set spawn type to respawn (not natural)
+                newZombie.setSpawnType(MobSpawnType.MOB_SUMMONED);
+
                 // Apply stat improvements based on death count
                 int deathCount = newZombie.entityData.get(DEATH_COUNT);
                 applyStatUpgrades(newZombie, deathCount);
@@ -310,6 +321,7 @@ public class HeadlessZombieEntity extends Zombie {
 
         tag.putInt("DeathCount", this.entityData.get(DEATH_COUNT));
         tag.putString("LastDeathSource", this.entityData.get(LAST_DEATH_SOURCE));
+        tag.putInt("SpawnType", this.entityData.get(SPAWN_TYPE));
 
         if (this.targetPlayerUUID != null) {
             tag.putUUID("TargetPlayerUUID", this.targetPlayerUUID);
@@ -341,6 +353,10 @@ public class HeadlessZombieEntity extends Zombie {
 
         if (tag.contains("LastDeathSource")) {
             this.entityData.set(LAST_DEATH_SOURCE, tag.getString("LastDeathSource"));
+        }
+
+        if (tag.contains("SpawnType")) {
+            this.entityData.set(SPAWN_TYPE, tag.getInt("SpawnType"));
         }
 
         if (tag.contains("TargetPlayerUUID")) {

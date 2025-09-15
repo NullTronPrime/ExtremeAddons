@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.MobSpawnType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
@@ -23,54 +24,18 @@ public class HeadlessZombieSpawnManager {
 
         Entity entity = event.getEntity();
         if (entity instanceof HeadlessZombieEntity headlessZombie) {
-            ServerLevel serverLevel = (ServerLevel) event.getLevel();
-            HeadlessZombieData data = HeadlessZombieData.get(serverLevel);
-
-            // Check if there's already a headless zombie in the world
-            if (data.hasActiveZombie()) {
-                UUID existingId = data.getZombieUUID();
-
-                // If this isn't the existing zombie, cancel the spawn
-                if (!headlessZombie.getUUID().equals(existingId)) {
-                    event.setCanceled(true);
-                    return;
-                }
+            // Only prevent NATURAL spawns - allow all other spawn types (spawn eggs, commands, etc.)
+            if (headlessZombie.getEntityData().get(HeadlessZombieEntity.SPAWN_TYPE) == MobSpawnType.NATURAL.ordinal()) {
+                event.setCanceled(true);
+                return;
             }
-
-            // Register this zombie as the active one
-            data.setZombieUUID(headlessZombie.getUUID());
-            data.setDirty();
         }
     }
 
     @SubscribeEvent
     public static void onWorldLoad(LevelEvent.Load event) {
-        if (event.getLevel().isClientSide()) return;
-        if (!(event.getLevel() instanceof ServerLevel serverLevel)) return;
-
-        HeadlessZombieData data = HeadlessZombieData.get(serverLevel);
-
-        // Check if we need to spawn the initial headless zombie
-        if (!data.hasActiveZombie() && !data.hasEverSpawned()) {
-            spawnInitialHeadlessZombie(serverLevel);
-            data.setEverSpawned(true);
-            data.setDirty();
-        }
-    }
-
-    private static void spawnInitialHeadlessZombie(ServerLevel serverLevel) {
-        HeadlessZombieEntity zombie = ModEntities.HEADLESS_ZOMBIE.get().create(serverLevel);
-        if (zombie != null) {
-            // Find a safe spawn location
-            BlockPos spawnPos = findSafeSpawnLocation(serverLevel);
-            zombie.moveTo(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5, 0.0F, 0.0F);
-
-            serverLevel.addFreshEntity(zombie);
-
-            HeadlessZombieData data = HeadlessZombieData.get(serverLevel);
-            data.setZombieUUID(zombie.getUUID());
-            data.setDirty();
-        }
+        // No longer auto-spawn headless zombie on world load
+        // They must be spawned manually via commands or spawn eggs
     }
 
     private static BlockPos findSafeSpawnLocation(ServerLevel serverLevel) {
@@ -98,51 +63,26 @@ public class HeadlessZombieSpawnManager {
         return worldSpawn; // Fallback
     }
 
-    // SavedData class to track the headless zombie across world saves/loads
+    // Simplified SavedData class - no longer needed for tracking single zombie
     public static class HeadlessZombieData extends SavedData {
         private static final String DATA_NAME = "headless_zombie_data";
 
-        private UUID zombieUUID;
         private boolean everSpawned = false;
 
         public HeadlessZombieData() {}
 
         public HeadlessZombieData(CompoundTag tag) {
-            if (tag.contains("ZombieUUID")) {
-                this.zombieUUID = tag.getUUID("ZombieUUID");
-            }
             this.everSpawned = tag.getBoolean("EverSpawned");
         }
 
         @Override
         public CompoundTag save(CompoundTag tag) {
-            if (this.zombieUUID != null) {
-                tag.putUUID("ZombieUUID", this.zombieUUID);
-            }
             tag.putBoolean("EverSpawned", this.everSpawned);
             return tag;
         }
 
         public static HeadlessZombieData get(ServerLevel level) {
             return level.getDataStorage().computeIfAbsent(HeadlessZombieData::new, HeadlessZombieData::new, DATA_NAME);
-        }
-
-        public boolean hasActiveZombie() {
-            return zombieUUID != null;
-        }
-
-        public UUID getZombieUUID() {
-            return zombieUUID;
-        }
-
-        public void setZombieUUID(UUID uuid) {
-            this.zombieUUID = uuid;
-            setDirty();
-        }
-
-        public void clearZombieUUID() {
-            this.zombieUUID = null;
-            setDirty();
         }
 
         public boolean hasEverSpawned() {
