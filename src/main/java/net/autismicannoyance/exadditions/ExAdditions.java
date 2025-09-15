@@ -1,6 +1,7 @@
 package net.autismicannoyance.exadditions;
 
 import net.autismicannoyance.exadditions.command.BlackHoleCommand;
+import net.autismicannoyance.exadditions.command.HeadlessZombieCommand;
 import net.autismicannoyance.exadditions.command.ResetVoidCommand;
 import net.autismicannoyance.exadditions.command.TestRenderCommand;
 import net.autismicannoyance.exadditions.effect.ModEffects;
@@ -8,7 +9,9 @@ import net.autismicannoyance.exadditions.enchantment.ModEnchantments;
 import net.autismicannoyance.exadditions.entity.ModEntities;
 import net.autismicannoyance.exadditions.entity.ModEntityDataSerializers;
 import net.autismicannoyance.exadditions.entity.client.PlayerlikeRenderer;
+import net.autismicannoyance.exadditions.entity.client.HeadlessZombieRenderer;
 import net.autismicannoyance.exadditions.entity.custom.PlayerlikeEntity;
+import net.autismicannoyance.exadditions.entity.custom.HeadlessZombieEntity;
 import net.autismicannoyance.exadditions.network.ModNetworking;
 import net.autismicannoyance.exadditions.potion.ModPotions;
 import net.autismicannoyance.exadditions.util.ModBrewingRecipes;
@@ -86,6 +89,15 @@ public class ExAdditions {
                     SpawnPlacements.Type.ON_GROUND,
                     Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                     (EntityType<PlayerlikeEntity> entityType, ServerLevelAccessor level, MobSpawnType spawnType, BlockPos pos, RandomSource random) -> true);
+
+            // Headless zombie spawn placement - very restrictive since it's managed by the spawn manager
+            SpawnPlacements.register(ModEntities.HEADLESS_ZOMBIE.get(),
+                    SpawnPlacements.Type.ON_GROUND,
+                    Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    (EntityType<HeadlessZombieEntity> entityType, ServerLevelAccessor level, MobSpawnType spawnType, BlockPos pos, RandomSource random) -> {
+                        // Only allow natural spawning in very rare cases, spawn manager handles most spawning
+                        return spawnType == MobSpawnType.NATURAL && random.nextInt(10000) == 0;
+                    });
         });
     }
 
@@ -107,10 +119,12 @@ public class ExAdditions {
         BlackHoleCommand.register(event.getDispatcher());
         ResetVoidCommand.register(event.getDispatcher());
         //TestRenderCommand.register(event.getDispatcher()); // Uncomment if needed
+        HeadlessZombieCommand.register(event.getDispatcher());
     }
 
     public void onAttributeCreate(EntityAttributeCreationEvent event) {
         event.put(ModEntities.PLAYERLIKE.get(), PlayerlikeEntity.createAttributes().build());
+        event.put(ModEntities.HEADLESS_ZOMBIE.get(), HeadlessZombieEntity.createAttributes().build());
     }
 
     @Mod.EventBusSubscriber(modid = MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
@@ -119,6 +133,7 @@ public class ExAdditions {
         @SubscribeEvent
         public static void onClientSetup(FMLClientSetupEvent event) {
             EntityRenderers.register(ModEntities.PLAYERLIKE.get(), PlayerlikeRenderer::new);
+            EntityRenderers.register(ModEntities.HEADLESS_ZOMBIE.get(), HeadlessZombieRenderer::new);
         }
     }
 }
