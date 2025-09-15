@@ -16,6 +16,7 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Commands for controlling Headless Zombies: spawn, kill, info, setdeaths, count.
@@ -85,8 +86,8 @@ public final class HeadlessZombieCommand {
 
         // Find all headless zombies
         for (Entity entity : serverLevel.getAllEntities()) {
-            if (entity instanceof HeadlessZombieEntity zombie) {
-                headlessZombies.add(zombie);
+            if (entity instanceof HeadlessZombieEntity) {
+                headlessZombies.add((HeadlessZombieEntity) entity);
             }
         }
 
@@ -143,8 +144,8 @@ public final class HeadlessZombieCommand {
 
         // Find all headless zombies
         for (Entity entity : serverLevel.getAllEntities()) {
-            if (entity instanceof HeadlessZombieEntity zombie) {
-                headlessZombies.add(zombie);
+            if (entity instanceof HeadlessZombieEntity) {
+                headlessZombies.add((HeadlessZombieEntity) entity);
             }
         }
 
@@ -168,6 +169,12 @@ public final class HeadlessZombieCommand {
                 attackDamageValue = zombie.getAttribute(Attributes.ATTACK_DAMAGE).getBaseValue();
             }
 
+            // Calculate knockback resistance using the entity's method
+            float knockbackReduction = zombie.getKnockbackReduction();
+
+            // Get damage resistances for display
+            Map<String, Float> resistances = zombie.getDamageResistances();
+
             infoBuilder.append("Zombie #").append(i + 1).append(":\n");
             infoBuilder.append("  Deaths: ").append(deathCount).append("\n");
             infoBuilder.append("  Last Death Source: ")
@@ -178,6 +185,18 @@ public final class HeadlessZombieCommand {
             infoBuilder.append("  Health: ").append(String.format("%.1f", zombie.getHealth()))
                     .append("/").append(String.format("%.1f", zombie.getMaxHealth())).append("\n");
             infoBuilder.append("  Attack Damage: ").append(String.format("%.1f", attackDamageValue)).append("\n");
+            infoBuilder.append("  Knockback Resistance: ").append(String.format("%.1f%%", knockbackReduction)).append("\n");
+
+            // Show damage resistances if any exist
+            if (!resistances.isEmpty()) {
+                infoBuilder.append("  Damage Resistances:\n");
+                for (Map.Entry<String, Float> entry : resistances.entrySet()) {
+                    String damageType = entry.getKey();
+                    float resistance = entry.getValue();
+                    infoBuilder.append("    ").append(damageType).append(": ")
+                            .append(String.format("%.1f%%", resistance * 100)).append("\n");
+                }
+            }
 
             if (i < headlessZombies.size() - 1) {
                 infoBuilder.append("\n");
@@ -203,8 +222,8 @@ public final class HeadlessZombieCommand {
 
         // Find all headless zombies
         for (Entity entity : serverLevel.getAllEntities()) {
-            if (entity instanceof HeadlessZombieEntity zombie) {
-                headlessZombies.add(zombie);
+            if (entity instanceof HeadlessZombieEntity) {
+                headlessZombies.add((HeadlessZombieEntity) entity);
             }
         }
 

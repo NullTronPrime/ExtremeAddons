@@ -159,6 +159,15 @@ public class ModItems {
     public static final RegistryObject<Item> HEADLESS_ZOMBIE_SPAWN_EGG = ITEMS.register("headless_zombie_spawn_egg",
             () -> new ForgeSpawnEggItem(ModEntities.HEADLESS_ZOMBIE, 0x3D5016, 0x8B0000, new Item.Properties()));
 
+    // WorldSlasher - Epic weapon that creates massive slash effects
+    public static final RegistryObject<Item> WORLDSLASHER = ITEMS.register("worldslasher",
+            () -> new WorldSlasherItem(new Item.Properties()
+                    .stacksTo(1)
+                    .durability(50)
+                    .rarity(Rarity.EPIC)
+                    .fireResistant()
+            ));
+
 
     public static void register(IEventBus eventBus){
         ITEMS.register(eventBus);

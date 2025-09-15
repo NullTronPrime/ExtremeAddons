@@ -135,5 +135,14 @@
 
   "boss.exadditions.mahoraga.phase.1": "Adaptation Phase",
   "boss.exadditions.mahoraga.phase.2": "Regeneration Phase",
-  "boss.exadditions.mahoraga.phase.3": "Final Phase"
+  "boss.exadditions.mahoraga.phase.3": "Final Phase",
+
+
+  "item.exadditions.worldslasher": "WorldSlasher",
+  "item.exadditions.worldslasher.tooltip.line1": "§0§lA blade that cuts through reality itself",
+  "item.exadditions.worldslasher.tooltip.line2": "§7Hold to charge void energy, release to tear space",
+  "item.exadditions.worldslasher.tooltip.line3": "§8Creates a massive vertical arc slash",
+  "item.exadditions.worldslasher.tooltip.line4": "§f⚡ §5Propagates in waves of destruction",
+  "item.exadditions.worldslasher.tooltip.line5": "§8Durability: 50 uses"
+
 }

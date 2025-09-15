@@ -39,6 +39,9 @@ public class HeadlessZombieEntity extends Zombie {
     // Damage resistance tracking - maps damage source to resistance level (0.0 to 0.9)
     private final Map<String, Float> damageResistances = new HashMap<>();
 
+    // Track the last damage source for knockback calculations
+    private DamageSource lastDamageSource;
+
     // Target tracking
     private UUID targetPlayerUUID;
     private Vec3 lastKnownPlayerPos;
@@ -187,6 +190,28 @@ public class HeadlessZombieEntity extends Zombie {
         float finalDamage = amount * (1.0f - resistance);
 
         return super.hurt(damageSource, finalDamage);
+    }
+
+    @Override
+    public void knockback(double strength, double x, double z) {
+        // Reduce knockback based on damage resistances
+        // If we have high resistance to many damage types, reduce overall knockback
+        float averageResistance = 0.0f;
+        if (!damageResistances.isEmpty()) {
+            float totalResistance = 0.0f;
+            for (float resistance : damageResistances.values()) {
+                totalResistance += resistance;
+            }
+            averageResistance = totalResistance / damageResistances.size();
+        }
+
+        // Reduce knockback strength based on average resistance (0.0 to 0.99)
+        double reducedStrength = strength * (1.0 - averageResistance);
+
+        // Always maintain some base knockback resistance due to the entity's nature
+        reducedStrength *= 0.1; // 90% knockback reduction as base
+
+        super.knockback(reducedStrength, x, z);
     }
 
     @Override
@@ -407,6 +432,17 @@ public class HeadlessZombieEntity extends Zombie {
 
     public String getLastDeathSource() {
         return this.entityData.get(LAST_DEATH_SOURCE);
+    }
+
+    public Map<String, Float> getDamageResistances() {
+        return new HashMap<>(damageResistances); // Return a copy to prevent external modification
+    }
+
+    public float getKnockbackReduction() {
+        int deathCount = this.getDeathCount();
+        double baseReduction = 80.0; // 80% base reduction
+        double deathCountReduction = Math.min(80.0, deathCount * 10.0); // Up to 80% more from deaths
+        return (float) Math.min(95.0, baseReduction + deathCountReduction); // Cap at 95%
     }
 
     // Custom AI Goals
