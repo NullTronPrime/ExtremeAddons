@@ -57,6 +57,8 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModItems.FIRE_WAND.get());
                         pOutput.accept(ModItems.ELECTRICITY_WAND.get());
                         pOutput.accept(ModItems.VOID_PORTAL.get());
+                        pOutput.accept(ModItems.HEADLESS_ZOMBIE_SPAWN_EGG.get());
+                        pOutput.accept(ModItems.PLAYERLIKE_SPAWN_EGG.get());
 
                     })
                     .build());

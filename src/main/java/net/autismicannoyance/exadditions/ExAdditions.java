@@ -95,8 +95,12 @@ public class ExAdditions {
                     SpawnPlacements.Type.ON_GROUND,
                     Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                     (EntityType<HeadlessZombieEntity> entityType, ServerLevelAccessor level, MobSpawnType spawnType, BlockPos pos, RandomSource random) -> {
-                        // Only allow natural spawning in very rare cases, spawn manager handles most spawning
-                        return spawnType == MobSpawnType.NATURAL && random.nextInt(10000) == 0;
+                        // Allow spawn eggs, commands, and very rare natural spawning
+                        if (spawnType == MobSpawnType.SPAWN_EGG || spawnType == MobSpawnType.COMMAND || spawnType == MobSpawnType.MOB_SUMMONED) {
+                            return true;
+                        }
+                        // Very rare natural spawning (for the spawn manager)
+                        return spawnType == MobSpawnType.NATURAL && random.nextInt(1000) == 0; // Increased from 10000 to 1000
                     });
         });
     }

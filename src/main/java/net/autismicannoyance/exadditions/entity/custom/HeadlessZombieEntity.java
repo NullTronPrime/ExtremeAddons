@@ -16,20 +16,22 @@ import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.*;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
-import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.monster.Zombie;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.phys.Vec3;
 
+import javax.annotation.ParametersAreNonnullByDefault;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-public class HeadlessZombieEntity extends Monster {
+@ParametersAreNonnullByDefault
+public class HeadlessZombieEntity extends Zombie {
 
-    private static final EntityDataAccessor<Integer> DEATH_COUNT = SynchedEntityData.defineId(HeadlessZombieEntity.class, EntityDataSerializers.INT);
+    public static final EntityDataAccessor<Integer> DEATH_COUNT = SynchedEntityData.defineId(HeadlessZombieEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<String> LAST_DEATH_SOURCE = SynchedEntityData.defineId(HeadlessZombieEntity.class, EntityDataSerializers.STRING);
 
     // Damage resistance tracking - maps damage source to resistance level (0.0 to 0.9)
@@ -46,7 +48,7 @@ public class HeadlessZombieEntity extends Monster {
     private static final double BASE_DAMAGE = 3.0;
     private static final double BASE_SPEED = 0.23;
 
-    public HeadlessZombieEntity(EntityType<? extends Monster> entityType, Level level) {
+    public HeadlessZombieEntity(EntityType<? extends Zombie> entityType, Level level) {
         super(entityType, level);
         this.setCanPickUpLoot(false);
     }
@@ -70,7 +72,7 @@ public class HeadlessZombieEntity extends Monster {
     }
 
     public static AttributeSupplier.Builder createAttributes() {
-        return Monster.createMonsterAttributes()
+        return Zombie.createAttributes()
                 .add(Attributes.MAX_HEALTH, BASE_HEALTH)
                 .add(Attributes.MOVEMENT_SPEED, BASE_SPEED)
                 .add(Attributes.ATTACK_DAMAGE, BASE_DAMAGE)

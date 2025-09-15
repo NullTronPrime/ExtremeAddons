@@ -10,6 +10,9 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.MobRenderer;
 import net.minecraft.resources.ResourceLocation;
 
+import javax.annotation.ParametersAreNonnullByDefault;
+
+@ParametersAreNonnullByDefault
 public class HeadlessZombieRenderer extends MobRenderer<HeadlessZombieEntity, ZombieModel<HeadlessZombieEntity>> {
 
     private static final ResourceLocation TEXTURE = new ResourceLocation(ExAdditions.MOD_ID, "textures/entity/headless_zombie.png");

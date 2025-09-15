@@ -156,6 +156,8 @@ public class ModItems {
             ));
     public static final RegistryObject<Item> PLAYERLIKE_SPAWN_EGG = ITEMS.register("playerlike_spawn_egg",
             () -> new ForgeSpawnEggItem(ModEntities.PLAYERLIKE, 0x7e9680, 0xc5d1c5, new Item.Properties()));
+    public static final RegistryObject<Item> HEADLESS_ZOMBIE_SPAWN_EGG = ITEMS.register("headless_zombie_spawn_egg",
+            () -> new ForgeSpawnEggItem(ModEntities.HEADLESS_ZOMBIE, 0x3D5016, 0x8B0000, new Item.Properties()));
 
 
     public static void register(IEventBus eventBus){
