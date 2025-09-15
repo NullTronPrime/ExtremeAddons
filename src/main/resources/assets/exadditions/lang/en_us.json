@@ -130,6 +130,9 @@
   "entity.exadditions.playerlike": "Mahoraga",
   "item.exadditions.playerlike_spawn_egg": "Mahoraga Spawn Egg",
 
+  "entity.exadditions.headless_zombie": "Headless Zombie",
+  "item.exadditions.headless_zombie_spawn_egg": "Headless Zombie Spawn Egg",
+
   "boss.exadditions.mahoraga.phase.1": "Adaptation Phase",
   "boss.exadditions.mahoraga.phase.2": "Regeneration Phase",
   "boss.exadditions.mahoraga.phase.3": "Final Phase"
