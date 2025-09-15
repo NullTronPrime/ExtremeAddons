@@ -127,7 +127,10 @@
   "item.exadditions.sapphire_shovel": "Sapphire Shovel",
   "item.exadditions.sapphire_hoe": "Sapphire Hoe",
 
-
   "entity.exadditions.playerlike": "Mahoraga",
-  "item.exadditions.playerlike_spawn_egg": "Playerlike Spawn Egg"
+  "item.exadditions.playerlike_spawn_egg": "Mahoraga Spawn Egg",
+
+  "boss.exadditions.mahoraga.phase.1": "Adaptation Phase",
+  "boss.exadditions.mahoraga.phase.2": "Regeneration Phase",
+  "boss.exadditions.mahoraga.phase.3": "Final Phase"
 }
