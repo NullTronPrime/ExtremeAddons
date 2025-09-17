@@ -57,6 +57,35 @@ public class WorldSlasherItem extends Item {
     }
 
     @Override
+    public boolean onLeftClickEntity(ItemStack stack, Player player, Entity target) {
+        // Send out flying slashes on normal attack
+        if (player.level() instanceof ServerLevel serverLevel) {
+            sendFlyingSlashes(serverLevel, player);
+
+            // Small cooldown for flying slashes (1 second)
+            player.getCooldowns().addCooldown(this, 20);
+
+            // Light damage to the item
+            stack.hurtAndBreak(1, player, (p) -> p.broadcastBreakEvent(p.getUsedItemHand()));
+        }
+
+        return super.onLeftClickEntity(stack, player, target);
+    }
+
+    @Override
+    public boolean hurtEnemy(ItemStack stack, LivingEntity target, LivingEntity attacker) {
+        // Also trigger flying slashes when hitting any living entity
+        if (attacker instanceof Player player && attacker.level() instanceof ServerLevel serverLevel) {
+            if (!player.getCooldowns().isOnCooldown(this)) {
+                sendFlyingSlashes(serverLevel, player);
+                player.getCooldowns().addCooldown(this, 20);
+            }
+        }
+
+        return super.hurtEnemy(stack, target, attacker);
+    }
+
+    @Override
     public void onUseTick(Level level, LivingEntity entity, ItemStack stack, int remainingUseDuration) {
         if (!(entity instanceof Player player)) return;
 
@@ -312,6 +341,209 @@ public class WorldSlasherItem extends Item {
                     // Void effects
                     livingEntity.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 80, 0));
                     livingEntity.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 120, 1));
+                }
+            }
+        }
+    }
+
+    private void sendFlyingSlashes(ServerLevel level, Player player) {
+        Vec3 playerPos = player.getEyePosition();
+        Vec3 lookDirection = player.getLookAngle();
+        Vec3 right = lookDirection.cross(new Vec3(0, 1, 0)).normalize();
+        if (right.length() < 0.1) {
+            right = lookDirection.cross(new Vec3(1, 0, 0)).normalize();
+        }
+
+        // Create 3 flying slash projectiles in a spread pattern
+        for (int i = -1; i <= 1; i++) {
+            double angleOffset = i * 15.0; // 15 degree spread
+            Vec3 slashDirection = rotateVectorAroundY(lookDirection, Math.toRadians(angleOffset));
+
+            // Start position slightly offset
+            Vec3 startPos = playerPos.add(lookDirection.scale(1.5)).add(right.scale(i * 0.8));
+
+            // Create flying slash
+            createFlyingSlash(level, startPos, slashDirection, player, i);
+        }
+
+        // Sound effect for flying slashes
+        level.playSound(null, player.blockPosition(),
+                SoundEvents.PLAYER_ATTACK_SWEEP, SoundSource.PLAYERS,
+                1.2f, 1.5f);
+        level.playSound(null, player.blockPosition(),
+                SoundEvents.ENCHANTMENT_TABLE_USE, SoundSource.PLAYERS,
+                0.8f, 2.0f);
+    }
+
+    private void createFlyingSlash(ServerLevel level, Vec3 startPos, Vec3 direction, Player owner, int slashIndex) {
+        VectorRenderer.Transform slashTransform = VectorRenderer.Transform.IDENTITY;
+
+        // Flying slash parameters
+        double slashLength = 4.0;
+        double slashWidth = 1.5;
+        double slashSpeed = 1.2; // blocks per tick
+        double maxRange = 25.0; // how far the slash travels
+        int slashLifetime = (int)(maxRange / slashSpeed); // ticks to live
+
+        // Color scheme - alternating black and white
+        int slashColor = (slashIndex % 2 == 0) ? 0xE0000000 : 0xE0FFFFFF; // Semi-transparent black or white
+        int trailColor = (slashIndex % 2 == 0) ? 0xFF111111 : 0xFFEEEEEE; // Dark gray or light gray
+
+        // Calculate slash orientation
+        Vec3 right = direction.cross(new Vec3(0, 1, 0)).normalize();
+        if (right.length() < 0.1) {
+            right = direction.cross(new Vec3(1, 0, 0)).normalize();
+        }
+        Vec3 up = right.cross(direction).normalize();
+
+        // Create the flying slash visual that moves over time
+        for (int tick = 0; tick < slashLifetime; tick++) {
+            Vec3 currentPos = startPos.add(direction.scale(tick * slashSpeed));
+
+            // Create slash shape - diamond/rhombus shape
+            Vec3 tip = currentPos.add(direction.scale(slashLength * 0.3));
+            Vec3 leftWing = currentPos.add(right.scale(-slashWidth * 0.5));
+            Vec3 rightWing = currentPos.add(right.scale(slashWidth * 0.5));
+            Vec3 tail = currentPos.add(direction.scale(-slashLength * 0.7));
+
+            // Add slight vertical movement for more dynamic look
+            double verticalOffset = Math.sin(tick * 0.3) * 0.2;
+            tip = tip.add(up.scale(verticalOffset));
+            leftWing = leftWing.add(up.scale(verticalOffset));
+            rightWing = rightWing.add(up.scale(verticalOffset));
+            tail = tail.add(up.scale(verticalOffset));
+
+            // Create the slash as triangular planes
+            int[] colors = {slashColor, slashColor, slashColor};
+            int startTick = tick * 2; // Each position appears 2 ticks after the previous
+            int duration = 25 - tick; // Later positions fade faster
+
+            // Top triangle
+            VectorRenderer.drawPlaneWorld(tip, leftWing, tail, colors, true,
+                    duration, slashTransform);
+            // Bottom triangle
+            VectorRenderer.drawPlaneWorld(tip, tail, rightWing, colors, true,
+                    duration, slashTransform);
+
+            // Edge trails for sharpness effect
+            VectorRenderer.drawLineWorld(tip, tail, trailColor, 2.5f, true,
+                    duration, slashTransform);
+            VectorRenderer.drawLineWorld(leftWing, rightWing, trailColor, 1.5f, true,
+                    duration, slashTransform);
+
+            // Small energy sphere at the tip
+            if (tick % 3 == 0) { // Every 3rd tick
+                int sphereColor = (slashIndex % 2 == 0) ? 0x80FFFFFF : 0x80000000; // Opposite color for contrast
+                VectorRenderer.drawSphereWorld(tip, 0.15f, sphereColor, 6, 4, false,
+                        duration / 2, slashTransform);
+            }
+        }
+
+        // Create particle trail
+        createFlyingSlashParticles(level, startPos, direction, slashLifetime, slashSpeed, slashIndex);
+
+        // Damage entities along the path
+        damageFlyingSlashPath(level, startPos, direction, slashLifetime, slashSpeed, owner, slashLength, slashWidth);
+    }
+
+    private void createFlyingSlashParticles(ServerLevel level, Vec3 startPos, Vec3 direction,
+                                            int lifetime, double speed, int slashIndex) {
+        Random random = new Random();
+
+        for (int tick = 0; tick < lifetime; tick += 2) { // Every other tick
+            Vec3 currentPos = startPos.add(direction.scale(tick * speed));
+
+            // Add some randomness to particle positions
+            Vec3 particlePos = currentPos.add(
+                    (random.nextDouble() - 0.5) * 0.8,
+                    (random.nextDouble() - 0.5) * 0.8,
+                    (random.nextDouble() - 0.5) * 0.8
+            );
+
+            if (slashIndex % 2 == 0) {
+                // Black slash - dark particles
+                level.sendParticles(ParticleTypes.SMOKE,
+                        particlePos.x, particlePos.y, particlePos.z, 2,
+                        0.3, 0.3, 0.3, 0.02);
+            } else {
+                // White slash - bright particles
+                level.sendParticles(ParticleTypes.END_ROD,
+                        particlePos.x, particlePos.y, particlePos.z, 1,
+                        0.2, 0.2, 0.2, 0.05);
+            }
+
+            // Void particles for mystical effect
+            if (tick % 4 == 0) {
+                level.sendParticles(ParticleTypes.PORTAL,
+                        particlePos.x, particlePos.y, particlePos.z, 1,
+                        0.1, 0.1, 0.1, 0.1);
+            }
+        }
+    }
+
+    private void damageFlyingSlashPath(ServerLevel level, Vec3 startPos, Vec3 direction,
+                                       int lifetime, double speed, Player owner,
+                                       double slashLength, double slashWidth) {
+
+        double totalRange = lifetime * speed;
+        int checkPoints = (int)(totalRange / 2.0); // Check every 2 blocks
+
+        for (int i = 0; i < checkPoints; i++) {
+            double distance = i * 2.0;
+            Vec3 checkPos = startPos.add(direction.scale(distance));
+
+            // Create damage area around this point
+            AABB damageArea = new AABB(
+                    checkPos.x - slashWidth, checkPos.y - slashLength, checkPos.z - slashWidth,
+                    checkPos.x + slashWidth, checkPos.y + slashLength, checkPos.z + slashWidth
+            );
+
+            List<Entity> nearbyEntities = level.getEntitiesOfClass(Entity.class, damageArea);
+
+            for (Entity entity : nearbyEntities) {
+                if (entity == owner || !entity.isAlive()) continue;
+
+                double entityDistance = entity.getEyePosition().distanceTo(checkPos);
+                if (entityDistance <= slashWidth * 1.2) { // Slightly larger hit area
+
+                    if (entity instanceof LivingEntity livingEntity) {
+                        float damage = 12.0f - (float)(entityDistance * 2); // 12 damage at center, less at edges
+                        damage = Math.max(3.0f, damage); // Minimum 3 damage
+
+                        livingEntity.hurt(level.damageSources().playerAttack(owner), damage);
+
+                        // Knockback in slash direction
+                        Vec3 knockback = direction.scale(1.5).add(0, 0.3, 0);
+                        entity.setDeltaMovement(entity.getDeltaMovement().add(knockback));
+
+                        // Brief weakness effect
+                        livingEntity.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 40, 0));
+
+                        // Hit particles
+                        level.sendParticles(ParticleTypes.CRIT,
+                                entity.getX(), entity.getY() + entity.getBbHeight() * 0.5, entity.getZ(), 3,
+                                0.3, 0.3, 0.3, 0.1);
+                    }
+                }
+            }
+
+            // Break weak blocks along the path
+            if (i % 3 == 0) { // Every 6 blocks
+                BlockPos blockPos = new BlockPos((int)checkPos.x, (int)checkPos.y, (int)checkPos.z);
+                BlockState state = level.getBlockState(blockPos);
+
+                if (!state.isAir()) {
+                    float destroySpeed = state.getDestroySpeed(level, blockPos);
+                    if (destroySpeed >= 0 && destroySpeed < 3.0f) { // Only very weak blocks
+                        if (level.getRandom().nextFloat() < 0.3f) {
+                            level.destroyBlock(blockPos, false); // Don't drop items
+
+                            // Small explosion effect
+                            level.sendParticles(ParticleTypes.POOF,
+                                    blockPos.getX() + 0.5, blockPos.getY() + 0.5, blockPos.getZ() + 0.5, 3,
+                                    0.2, 0.2, 0.2, 0.05);
+                        }
+                    }
                 }
             }
         }
