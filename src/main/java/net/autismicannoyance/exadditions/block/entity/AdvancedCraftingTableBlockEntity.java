@@ -5,6 +5,7 @@ import net.autismicannoyance.exadditions.recipe.ModRecipeTypes;
 import net.autismicannoyance.exadditions.screen.AdvancedCraftingMenu;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.Containers;
@@ -21,6 +22,7 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.HopperBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
@@ -37,12 +39,15 @@ import java.util.List;
 import java.util.Optional;
 
 public class AdvancedCraftingTableBlockEntity extends BlockEntity implements MenuProvider {
+    private boolean isUpdatingResult = false; // Flag to prevent recursive updates
+
     private final ItemStackHandler itemHandler = new ItemStackHandler(26) { // 25 crafting slots + 1 result slot
         @Override
         protected void onContentsChanged(int slot) {
             setChanged();
-            // Update crafting result when input slots change
-            if (slot < 25) { // Only update for input slots, not result slot
+            // Update crafting result when input slots change, but NOT when result slot changes
+            // Also prevent updates during result extraction
+            if (slot < 25 && !isUpdatingResult) { // Only update for input slots, not result slot
                 updateCraftingResult();
             }
         }
@@ -50,6 +55,40 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
         @Override
         public boolean isItemValid(int slot, @NotNull ItemStack stack) {
             return slot != 25; // Only result slot (25) is not valid for insertion
+        }
+
+        @Override
+        public ItemStack extractItem(int slot, int amount, boolean simulate) {
+            if (slot == 25) {
+                // When extracting from result slot, trigger crafting consumption
+                ItemStack result = super.extractItem(slot, amount, simulate);
+                if (!result.isEmpty() && !simulate) {
+                    System.out.println("DEBUG: Result extracted from slot, amount: " + amount);
+
+                    isUpdatingResult = true; // Prevent recursive updates
+
+                    // Handle multiple crafts for shift-click
+                    int craftsToPerform = Math.min(amount, result.getCount());
+                    for (int i = 0; i < craftsToPerform; i++) {
+                        System.out.println("DEBUG: Performing craft " + (i + 1) + "/" + craftsToPerform);
+                        consumeIngredientsForBestRecipe();
+
+                        // Check if we can still craft more
+                        if (i < craftsToPerform - 1) {
+                            ItemStack nextResult = calculateCraftingResult();
+                            if (nextResult.isEmpty()) {
+                                System.out.println("DEBUG: Cannot craft more, stopping at " + (i + 1));
+                                break;
+                            }
+                        }
+                    }
+
+                    updateCraftingResult(); // Update for next craft
+                    isUpdatingResult = false; // Re-enable updates
+                }
+                return result;
+            }
+            return super.extractItem(slot, amount, simulate);
         }
     };
 
@@ -152,6 +191,23 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
     private void performAutoCraft() {
         if (level == null || level.isClientSide()) return;
 
+        // Check if there's a hopper or container below before crafting
+        BlockEntity blockEntityBelow = level.getBlockEntity(worldPosition.below());
+        boolean hasOutputContainer = false;
+
+        if (blockEntityBelow instanceof HopperBlockEntity) {
+            hasOutputContainer = true;
+        } else if (blockEntityBelow != null) {
+            LazyOptional<IItemHandler> handlerBelow = blockEntityBelow.getCapability(ForgeCapabilities.ITEM_HANDLER, Direction.UP);
+            hasOutputContainer = handlerBelow.isPresent();
+        }
+
+        // Only auto-craft if there's an output container
+        if (!hasOutputContainer) {
+            System.out.println("DEBUG: No output container found, skipping auto-craft");
+            return;
+        }
+
         // Check if result slot is empty or can accept more items
         ItemStack currentResult = itemHandler.getStackInSlot(25);
         ItemStack potentialResult = calculateCraftingResult();
@@ -162,7 +218,15 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
         if (currentResult.isEmpty()) {
             // Consume ingredients and set result
             consumeIngredientsForBestRecipe();
-            itemHandler.setStackInSlot(25, potentialResult.copy());
+            ItemStack result = potentialResult.copy();
+
+            // Try to push to container below first
+            if (tryPushResultToContainer(result)) {
+                // Successfully pushed, don't put in result slot
+            } else {
+                // Couldn't push, put in result slot
+                itemHandler.setStackInSlot(25, result);
+            }
             setChanged();
         } else if (ItemStack.isSameItemSameTags(currentResult, potentialResult) &&
                 currentResult.getCount() + potentialResult.getCount() <= currentResult.getMaxStackSize()) {
@@ -175,9 +239,23 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
     }
 
     public void updateCraftingResult() {
-        if (level == null || level.isClientSide()) return;
+        if (level == null || level.isClientSide() || isUpdatingResult) return;
+
+        // DEBUG: Log what items we have (but less spammy)
+        boolean hasItems = false;
+        for (int i = 0; i < 25; i++) {
+            if (!itemHandler.getStackInSlot(i).isEmpty()) {
+                hasItems = true;
+                break;
+            }
+        }
+
+        if (hasItems) {
+            System.out.println("DEBUG: Updating crafting result with items in grid");
+        }
 
         ItemStack result = calculateCraftingResult();
+        System.out.println("DEBUG: Calculated result: " + result);
         itemHandler.setStackInSlot(25, result);
         setChanged();
     }
@@ -290,6 +368,9 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
                         .getRecipeFor(RecipeType.CRAFTING, wrappedContainer, level);
 
                 if (recipe.isPresent()) {
+                    // DEBUG: Log what recipe we found
+                    System.out.println("DEBUG: Found recipe: " + recipe.get().getId() + " (" + recipe.get().getClass().getSimpleName() + ")");
+
                     // Count non-empty items in this recipe
                     int itemCount = 0;
                     for (int i = 0; i < 9; i++) {
@@ -299,7 +380,8 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
                     }
 
                     ItemStack result = recipe.get().assemble(wrappedContainer, level.registryAccess());
-                    validRecipes.add(new ValidRecipe(recipe.get(), result, itemCount, startRow, startCol));
+                    // FIXED: Pass the wrappedContainer here
+                    validRecipes.add(new ValidRecipe(recipe.get(), result, itemCount, startRow, startCol, wrappedContainer));
                 }
             }
         }
@@ -329,7 +411,8 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
                 .getRecipeFor(ModRecipeTypes.ADVANCED_CRAFTING_TYPE.get(), fullContainer, level);
 
         if (advancedRecipe.isPresent()) {
-            // Handle advanced crafting consumption
+            System.out.println("DEBUG: Using advanced crafting recipe");
+            // Handle advanced crafting consumption (5x5 recipes don't support remaining items yet)
             for (int i = 0; i < 25; i++) {
                 ItemStack currentStack = itemHandler.getStackInSlot(i);
                 if (!currentStack.isEmpty()) {
@@ -340,10 +423,10 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
             return;
         }
 
-        // Handle regular crafting consumption
+        // Handle regular 3x3 crafting consumption with proper remaining items support
         List<ValidRecipe> validRecipes = new ArrayList<>();
 
-        // Find all valid recipes again
+        // Find all valid recipes again (same logic as findBestRegularCraftingResult)
         for (int startRow = 0; startRow <= 2; startRow++) {
             for (int startCol = 0; startCol <= 2; startCol++) {
                 SimpleContainer craftingContainer = new SimpleContainer(9);
@@ -356,6 +439,17 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
                         craftingContainer.setItem(row * 3 + col, stackInSlot);
                     }
                 }
+
+                // Check if this 3x3 area has any items
+                boolean hasItems = false;
+                for (int i = 0; i < 9; i++) {
+                    if (!craftingContainer.getItem(i).isEmpty()) {
+                        hasItems = true;
+                        break;
+                    }
+                }
+
+                if (!hasItems) continue;
 
                 // Check if this matches a recipe using CraftingContainer wrapper
                 CraftingContainer wrappedContainer = new CraftingContainer() {
@@ -428,7 +522,7 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
                     }
 
                     ItemStack result = recipe.get().assemble(wrappedContainer, level.registryAccess());
-                    validRecipes.add(new ValidRecipe(recipe.get(), result, itemCount, startRow, startCol));
+                    validRecipes.add(new ValidRecipe(recipe.get(), result, itemCount, startRow, startCol, wrappedContainer));
                 }
             }
         }
@@ -442,27 +536,149 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
                 }
             }
 
-            // Consume ingredients from the best recipe's 3x3 area
+            // DEBUG: Add extensive logging for sharpening recipe
+            System.out.println("DEBUG: Recipe type: " + bestRecipe.recipe.getClass().getSimpleName());
+            System.out.println("DEBUG: Recipe ID: " + bestRecipe.recipe.getId());
+
+            // Check if this is specifically our sharpening recipe
+            boolean isSharpeningRecipe = bestRecipe.recipe.getId().toString().contains("sharpened_diamond");
+            System.out.println("DEBUG: Is sharpening recipe: " + isSharpeningRecipe);
+
+            // Get remaining items from the recipe (this handles custom recipes properly)
+            NonNullList<ItemStack> remainingItems = bestRecipe.recipe.getRemainingItems(bestRecipe.craftingContainer);
+
+            // DEBUG: Print all input items
+            System.out.println("DEBUG: Input items:");
+            for (int i = 0; i < bestRecipe.craftingContainer.getContainerSize(); i++) {
+                ItemStack input = bestRecipe.craftingContainer.getItem(i);
+                if (!input.isEmpty()) {
+                    System.out.println("  Slot " + i + ": " + input + " (damage: " + input.getDamageValue() + "/" + input.getMaxDamage() + ")");
+                }
+            }
+
+            // DEBUG: Print remaining items
+            System.out.println("DEBUG: Remaining items:");
+            for (int i = 0; i < remainingItems.size(); i++) {
+                ItemStack remaining = remainingItems.get(i);
+                if (!remaining.isEmpty()) {
+                    System.out.println("  Slot " + i + ": " + remaining + " (damage: " + remaining.getDamageValue() + "/" + remaining.getMaxDamage() + ")");
+                }
+            }
+
+            // Apply the remaining items back to the grid
             for (int row = 0; row < 3; row++) {
                 for (int col = 0; col < 3; col++) {
                     int gridIndex = (bestRecipe.startRow + row) * 5 + (bestRecipe.startCol + col);
+                    int craftingIndex = row * 3 + col;
+
+                    System.out.println("DEBUG: Processing grid slot " + gridIndex + " (row=" + (bestRecipe.startRow + row) + ", col=" + (bestRecipe.startCol + col) + ") from crafting slot " + craftingIndex);
+
                     ItemStack currentStack = itemHandler.getStackInSlot(gridIndex);
                     if (!currentStack.isEmpty()) {
-                        // Handle container items (like buckets)
-                        if (currentStack.hasCraftingRemainingItem()) {
-                            ItemStack remainingItem = currentStack.getCraftingRemainingItem();
-                            currentStack.shrink(1);
-                            if (currentStack.isEmpty()) {
-                                itemHandler.setStackInSlot(gridIndex, remainingItem);
-                            }
+                        // Check if there's a remaining item for this slot
+                        ItemStack remainingItem = remainingItems.get(craftingIndex);
+
+                        if (!remainingItem.isEmpty()) {
+                            // Set the remaining item (this handles damaged swords, etc.)
+                            System.out.println("DEBUG: Setting remaining item at grid " + gridIndex + " (crafting " + craftingIndex + "): " + remainingItem + " (damage: " + remainingItem.getDamageValue() + ")");
+                            itemHandler.setStackInSlot(gridIndex, remainingItem.copy());
                         } else {
-                            currentStack.shrink(1);
-                            itemHandler.setStackInSlot(gridIndex, currentStack);
+                            // Standard consumption - reduce by 1
+                            System.out.println("DEBUG: Standard consumption at grid " + gridIndex + " (crafting " + craftingIndex + ")");
+                            if (currentStack.hasCraftingRemainingItem()) {
+                                ItemStack containerItem = currentStack.getCraftingRemainingItem();
+                                currentStack.shrink(1);
+                                if (currentStack.isEmpty()) {
+                                    itemHandler.setStackInSlot(gridIndex, containerItem);
+                                }
+                            } else {
+                                currentStack.shrink(1);
+                                itemHandler.setStackInSlot(gridIndex, currentStack);
+                            }
                         }
                     }
                 }
             }
+        } else {
+            System.out.println("DEBUG: No valid recipes found for consumption");
         }
+    }
+
+    // Helper method to try pushing result to container below
+    private boolean tryPushResultToContainer(ItemStack result) {
+        BlockEntity blockEntityBelow = level.getBlockEntity(worldPosition.below());
+
+        if (blockEntityBelow instanceof HopperBlockEntity hopperBelow) {
+            // Try to insert into the hopper
+            for (int i = 0; i < 5; i++) { // Hopper has 5 slots
+                ItemStack hopperStack = hopperBelow.getItem(i);
+                if (hopperStack.isEmpty()) {
+                    // Empty slot - put the result here
+                    hopperBelow.setItem(i, result.copy());
+                    return true;
+                } else if (ItemStack.isSameItemSameTags(hopperStack, result) &&
+                        hopperStack.getCount() + result.getCount() <= hopperStack.getMaxStackSize()) {
+                    // Can stack with existing item
+                    hopperStack.grow(result.getCount());
+                    return true;
+                }
+            }
+        }
+
+        // If hopper didn't work, try with any IItemHandler below
+        if (blockEntityBelow != null) {
+            LazyOptional<IItemHandler> handlerBelow = blockEntityBelow.getCapability(ForgeCapabilities.ITEM_HANDLER, Direction.UP);
+
+            if (handlerBelow.isPresent()) {
+                IItemHandler handler = handlerBelow.orElse(null);
+                if (handler != null) {
+                    // Try to insert into the item handler
+                    ItemStack remaining = handler.insertItem(0, result.copy(), false);
+                    return remaining.getCount() < result.getCount();
+                }
+            }
+        }
+
+        return false; // Couldn't push to any container
+    }
+
+    // Method called when the craft button is pressed in the GUI
+    public void onCraftButtonPressed() {
+        if (level == null || level.isClientSide()) return;
+
+        System.out.println("DEBUG: Craft button pressed");
+
+        // Get the current result
+        ItemStack result = itemHandler.getStackInSlot(25);
+        if (result.isEmpty()) {
+            System.out.println("DEBUG: No result to craft");
+            return;
+        }
+
+        System.out.println("DEBUG: Crafting result: " + result);
+
+        // Always consume ingredients when button is pressed
+        consumeIngredientsForBestRecipe();
+
+        // Try to push to container below first
+        if (tryPushResultToContainer(result)) {
+            System.out.println("DEBUG: Pushed result to container below");
+            // Successfully pushed, clear the result slot
+            itemHandler.setStackInSlot(25, ItemStack.EMPTY);
+        } else {
+            System.out.println("DEBUG: No container below, keeping result in output slot");
+            // No container below, keep result in output slot for manual collection
+        }
+
+        // Update the result for the next craft
+        updateCraftingResult();
+        setChanged();
+    }
+
+    // TEST METHOD - Call this from your GUI or command to test the button manually
+    public void testCraftButton() {
+        System.out.println("DEBUG: TEST - Manual craft button test");
+        onCraftButtonPressed();
     }
 
     // Comparator support - calculate fill level based on input slots
@@ -487,20 +703,22 @@ public class AdvancedCraftingTableBlockEntity extends BlockEntity implements Men
         return this.itemHandler;
     }
 
-    // Helper class to store valid recipes with their item counts
+    // Updated ValidRecipe class with CraftingContainer
     private static class ValidRecipe {
         final CraftingRecipe recipe;
         final ItemStack result;
         final int itemCount;
         final int startRow;
         final int startCol;
+        final CraftingContainer craftingContainer;
 
-        ValidRecipe(CraftingRecipe recipe, ItemStack result, int itemCount, int startRow, int startCol) {
+        ValidRecipe(CraftingRecipe recipe, ItemStack result, int itemCount, int startRow, int startCol, CraftingContainer craftingContainer) {
             this.recipe = recipe;
             this.result = result;
             this.itemCount = itemCount;
             this.startRow = startRow;
             this.startCol = startCol;
+            this.craftingContainer = craftingContainer;
         }
     }
 }

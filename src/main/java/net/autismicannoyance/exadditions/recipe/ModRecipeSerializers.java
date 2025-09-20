@@ -14,6 +14,10 @@ public class ModRecipeSerializers {
     public static final RegistryObject<RecipeSerializer<AdvancedCraftingRecipe>> ADVANCED_CRAFTING_SERIALIZER =
             RECIPE_SERIALIZERS.register("advanced_crafting", AdvancedCraftingRecipeSerializer::new);
 
+    // ADD THIS LINE:
+    public static final RegistryObject<RecipeSerializer<SharpenedDiamondRecipe>> SHARPENED_DIAMOND_SERIALIZER =
+            RECIPE_SERIALIZERS.register("sharpened_diamond", SharpenedDiamondRecipeSerializer::new);
+
     public static void register(IEventBus eventBus) {
         RECIPE_SERIALIZERS.register(eventBus);
     }
