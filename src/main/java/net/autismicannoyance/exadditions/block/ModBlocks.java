@@ -2,6 +2,7 @@ package net.autismicannoyance.exadditions.block;
 
 import net.autismicannoyance.exadditions.ExAdditions;
 import net.autismicannoyance.exadditions.block.custom.SoundBlock;
+import net.autismicannoyance.exadditions.block.custom.AdvancedCraftingTableBlock;
 import net.autismicannoyance.exadditions.item.ModItems;
 import net.minecraft.util.valueproviders.UniformInt;
 import net.minecraft.world.item.BlockItem;
@@ -51,6 +52,11 @@ public class ModBlocks {
     public static final RegistryObject<Block> SOUND_BLOCK = registerBlock("sound_block",
             () -> new SoundBlock(BlockBehaviour.Properties.copy(Blocks.NOTE_BLOCK)
                     .strength(0.1F)));
+
+    public static final RegistryObject<Block> ADVANCED_CRAFTING_TABLE = registerBlock("advanced_crafting_table",
+            () -> new AdvancedCraftingTableBlock(BlockBehaviour.Properties.copy(Blocks.CRAFTING_TABLE)
+                    .strength(2.5F)
+                    .sound(SoundType.WOOD)));
 
 
     private  static <T extends Block>RegistryObject<T> registerBlock(String name, Supplier<T> block){

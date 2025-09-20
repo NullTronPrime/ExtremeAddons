@@ -1,0 +1,38 @@
+{
+  "type": "exadditions:advanced_crafting",
+  "ingredients": [
+    {"item": "exadditions:sapphire"},
+    {"item": "exadditions:sapphire"},
+    {"item": "exadditions:sapphire"},
+    {"item": "exadditions:sapphire"},
+    {"item": "exadditions:sapphire"},
+
+    {"item": "exadditions:sapphire"},
+    {"item": "minecraft:diamond"},
+    {"item": "minecraft:diamond"},
+    {"item": "minecraft:diamond"},
+    {"item": "exadditions:sapphire"},
+
+    {"item": "exadditions:sapphire"},
+    {"item": "minecraft:diamond"},
+    {"item": "minecraft:nether_star"},
+    {"item": "minecraft:diamond"},
+    {"item": "exadditions:sapphire"},
+
+    {"item": "exadditions:sapphire"},
+    {"item": "minecraft:diamond"},
+    {"item": "minecraft:diamond"},
+    {"item": "minecraft:diamond"},
+    {"item": "exadditions:sapphire"},
+
+    {"item": "exadditions:sapphire"},
+    {"item": "exadditions:sapphire"},
+    {"item": "exadditions:sapphire"},
+    {"item": "exadditions:sapphire"},
+    {"item": "exadditions:sapphire"}
+  ],
+  "output": {
+    "item": "exadditions:chaos_crystal",
+    "count": 3
+  }
+}

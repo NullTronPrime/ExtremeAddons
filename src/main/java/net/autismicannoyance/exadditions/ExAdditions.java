@@ -1,5 +1,6 @@
 package net.autismicannoyance.exadditions;
 
+import net.autismicannoyance.exadditions.block.entity.ModBlockEntities;
 import net.autismicannoyance.exadditions.command.BlackHoleCommand;
 import net.autismicannoyance.exadditions.command.HeadlessZombieCommand;
 import net.autismicannoyance.exadditions.command.ResetVoidCommand;
@@ -14,8 +15,13 @@ import net.autismicannoyance.exadditions.entity.custom.PlayerlikeEntity;
 import net.autismicannoyance.exadditions.entity.custom.HeadlessZombieEntity;
 import net.autismicannoyance.exadditions.network.ModNetworking;
 import net.autismicannoyance.exadditions.potion.ModPotions;
+import net.autismicannoyance.exadditions.recipe.ModRecipeSerializers;
+import net.autismicannoyance.exadditions.recipe.ModRecipeTypes;
+import net.autismicannoyance.exadditions.screen.AdvancedCraftingScreen;
+import net.autismicannoyance.exadditions.screen.ModMenuTypes;
 import net.autismicannoyance.exadditions.util.ModBrewingRecipes;
 import net.autismicannoyance.exadditions.world.dimension.ModChunkGenerators;
+import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.client.renderer.entity.EntityRenderers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.RandomSource;
@@ -59,6 +65,10 @@ public class ExAdditions {
 
         ModItems.register(modEventBus);
         ModBlocks.register(modEventBus);
+        ModBlockEntities.register(modEventBus);
+        ModMenuTypes.register(modEventBus);
+        ModRecipeTypes.register(modEventBus);
+        ModRecipeSerializers.register(modEventBus);
         ModEnchantments.register(modEventBus);
         ModEffects.register(modEventBus);
         ModPotions.register(modEventBus);
@@ -137,6 +147,8 @@ public class ExAdditions {
         public static void onClientSetup(FMLClientSetupEvent event) {
             EntityRenderers.register(ModEntities.PLAYERLIKE.get(), PlayerlikeRenderer::new);
             EntityRenderers.register(ModEntities.HEADLESS_ZOMBIE.get(), HeadlessZombieRenderer::new);
+
+            MenuScreens.register(ModMenuTypes.ADVANCED_CRAFTING_MENU.get(), AdvancedCraftingScreen::new);
         }
     }
 }

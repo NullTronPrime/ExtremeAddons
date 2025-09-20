@@ -1,0 +1,11 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "down": "exadditions:block/advanced_crafting_table_bottom",
+    "up": "exadditions:block/advanced_crafting_table_top",
+    "north": "exadditions:block/advanced_crafting_table_front",
+    "south": "exadditions:block/advanced_crafting_table_side",
+    "west": "exadditions:block/advanced_crafting_table_side",
+    "east": "exadditions:block/advanced_crafting_table_side"
+  }
+}
