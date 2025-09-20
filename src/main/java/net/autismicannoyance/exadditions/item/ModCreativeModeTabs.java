@@ -19,6 +19,10 @@ public class ModCreativeModeTabs {
                     .title(Component.translatable("creativetab.additions_tab"))
                     .displayItems((pParameters,pOutput)->{
                         pOutput.accept(ModItems.SAPPHIRE.get());
+                        pOutput.accept(ModItems.JASPER.get());
+                        pOutput.accept(ModItems.JASPER_INGOT.get());
+                        pOutput.accept(ModItems.BLOOD_DIAMOND.get());
+                        pOutput.accept(ModItems.SHARPENED_DIAMOND.get());
                         pOutput.accept(ModItems.STRAWBERRY.get());
                         pOutput.accept(ModItems.RAW_SAPPHIRE.get());
                         pOutput.accept(ModItems.METAL_DETECTOR.get());

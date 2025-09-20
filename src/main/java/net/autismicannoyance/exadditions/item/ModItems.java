@@ -17,6 +17,14 @@ public class ModItems {
 
     public static final RegistryObject<Item> SAPPHIRE= ITEMS.register("sapphire",
             () -> new Item(new Item.Properties()));
+    public static final RegistryObject<Item> JASPER= ITEMS.register("jasper",
+            () -> new Item(new Item.Properties()));
+    public static final RegistryObject<Item> JASPER_INGOT= ITEMS.register("jasper_ingot",
+            () -> new Item(new Item.Properties()));
+    public static final RegistryObject<Item> BLOOD_DIAMOND= ITEMS.register("blood_diamond",
+            () -> new Item(new Item.Properties()));
+    public static final RegistryObject<Item> SHARPENED_DIAMOND= ITEMS.register("sharpened_diamond",
+            () -> new Item(new Item.Properties()));
 
     public static final RegistryObject<Item> STRAWBERRY = ITEMS.register("strawberry",
             () -> new Item(new Item.Properties().food(ModFoods.STRAWBERRY)));

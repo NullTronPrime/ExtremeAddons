@@ -1,0 +1,38 @@
+{
+  "type": "exadditions:advanced_crafting",
+  "ingredients": [
+    {"item": "minecraft:rotten_flesh"},
+    {"item": "minecraft:rotten_flesh"},
+    {"item": "minecraft:rotten_flesh"},
+    {"item": "minecraft:rotten_flesh"},
+    {"item": "minecraft:rotten_flesh"},
+
+    {"item": "minecraft:rotten_flesh"},
+    {"item": "minecraft:bone"},
+    {"item": "minecraft:gunpowder"},
+    {"item": "minecraft:bone"},
+    {"item": "minecraft:rotten_flesh"},
+
+    {"item": "minecraft:rotten_flesh"},
+    {"item": "minecraft:diamond"},
+    {"item": "minecraft:diamond"},
+    {"item": "minecraft:diamond"},
+    {"item": "minecraft:rotten_flesh"},
+
+    {"item": "minecraft:rotten_flesh"},
+    {"item": "minecraft:bone"},
+    {"item": "minecraft:gunpowder"},
+    {"item": "minecraft:bone"},
+    {"item": "minecraft:rotten_flesh"},
+
+    {"item": "minecraft:rotten_flesh"},
+    {"item": "minecraft:rotten_flesh"},
+    {"item": "minecraft:rotten_flesh"},
+    {"item": "minecraft:rotten_flesh"},
+    {"item": "minecraft:rotten_flesh"}
+  ],
+  "output": {
+    "item": "exadditions:blood_diamond",
+    "count": 3
+  }
+}
