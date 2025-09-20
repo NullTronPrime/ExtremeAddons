@@ -3,14 +3,18 @@ package net.autismicannoyance.exadditions.block.custom;
 import net.autismicannoyance.exadditions.block.entity.AdvancedCraftingTableBlockEntity;
 import net.autismicannoyance.exadditions.block.entity.ModBlockEntities;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.RenderShape;
@@ -56,6 +60,33 @@ public class AdvancedCraftingTableBlock extends BaseEntityBlock {
             }
         }
         return InteractionResult.sidedSuccess(pLevel.isClientSide());
+    }
+
+    // Handle redstone signals
+    @Override
+    public void neighborChanged(BlockState pState, Level pLevel, BlockPos pPos, net.minecraft.world.level.block.Block pNeighborBlock, BlockPos pNeighborPos, boolean pMovedByPiston) {
+        if (!pLevel.isClientSide()) {
+            boolean isPowered = pLevel.hasNeighborSignal(pPos);
+            BlockEntity blockEntity = pLevel.getBlockEntity(pPos);
+            if (blockEntity instanceof AdvancedCraftingTableBlockEntity craftingTable) {
+                craftingTable.setRedstoneSignal(isPowered);
+            }
+        }
+    }
+
+    // Comparator support - read the fill level of the crafting table
+    @Override
+    public boolean hasAnalogOutputSignal(BlockState pState) {
+        return true;
+    }
+
+    @Override
+    public int getAnalogOutputSignal(BlockState pState, Level pLevel, BlockPos pPos) {
+        BlockEntity blockEntity = pLevel.getBlockEntity(pPos);
+        if (blockEntity instanceof AdvancedCraftingTableBlockEntity craftingTable) {
+            return craftingTable.getComparatorLevel();
+        }
+        return 0;
     }
 
     @Nullable

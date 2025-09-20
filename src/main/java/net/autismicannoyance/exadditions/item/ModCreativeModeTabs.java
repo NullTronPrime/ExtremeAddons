@@ -60,6 +60,7 @@ public class ModCreativeModeTabs {
                         pOutput.accept(ModItems.VOID_PORTAL.get());
                         pOutput.accept(ModItems.HEADLESS_ZOMBIE_SPAWN_EGG.get());
                         pOutput.accept(ModItems.PLAYERLIKE_SPAWN_EGG.get());
+                        pOutput.accept(ModBlocks.ADVANCED_CRAFTING_TABLE.get());
 
                     })
                     .build());

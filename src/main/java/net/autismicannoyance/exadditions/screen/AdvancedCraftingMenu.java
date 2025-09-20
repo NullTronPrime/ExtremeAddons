@@ -16,6 +16,8 @@ import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.SlotItemHandler;
 
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.List;
 
 public class AdvancedCraftingMenu extends AbstractContainerMenu {
     public final AdvancedCraftingTableBlockEntity blockEntity;
@@ -83,6 +85,8 @@ public class AdvancedCraftingMenu extends AbstractContainerMenu {
     }
 
     private ItemStack tryRegularCrafting() {
+        List<ValidRecipe> validRecipes = new ArrayList<>();
+
         // Try all possible 3x3 positions within the 5x5 grid
         for (int startRow = 0; startRow <= 2; startRow++) {
             for (int startCol = 0; startCol <= 2; startCol++) {
@@ -113,12 +117,49 @@ public class AdvancedCraftingMenu extends AbstractContainerMenu {
                         .getRecipeFor(RecipeType.CRAFTING, craftingContainer, level);
 
                 if (recipe.isPresent()) {
-                    return recipe.get().assemble(craftingContainer, level.registryAccess());
+                    // Count non-empty items in this recipe
+                    int itemCount = 0;
+                    for (int i = 0; i < 9; i++) {
+                        if (!craftingContainer.getItem(i).isEmpty()) {
+                            itemCount++;
+                        }
+                    }
+
+                    ItemStack result = recipe.get().assemble(craftingContainer, level.registryAccess());
+                    validRecipes.add(new ValidRecipe(recipe.get(), result, itemCount, startRow, startCol));
                 }
             }
         }
 
+        // Find the recipe that uses the most items (prioritize more complex recipes)
+        if (!validRecipes.isEmpty()) {
+            ValidRecipe bestRecipe = validRecipes.get(0);
+            for (ValidRecipe recipe : validRecipes) {
+                if (recipe.itemCount > bestRecipe.itemCount) {
+                    bestRecipe = recipe;
+                }
+            }
+            return bestRecipe.result;
+        }
+
         return ItemStack.EMPTY;
+    }
+
+    // Helper class to store valid recipes with their item counts
+    private static class ValidRecipe {
+        final CraftingRecipe recipe;
+        final ItemStack result;
+        final int itemCount;
+        final int startRow;
+        final int startCol;
+
+        ValidRecipe(CraftingRecipe recipe, ItemStack result, int itemCount, int startRow, int startCol) {
+            this.recipe = recipe;
+            this.result = result;
+            this.itemCount = itemCount;
+            this.startRow = startRow;
+            this.startCol = startCol;
+        }
     }
 
     // Custom result slot that handles both advanced and regular crafting
@@ -165,7 +206,9 @@ public class AdvancedCraftingMenu extends AbstractContainerMenu {
         }
 
         private void consumeRegularCraftingIngredients() {
-            // Find which 3x3 area has the active recipe and consume those items
+            List<ValidRecipe> validRecipes = new ArrayList<>();
+
+            // Find all valid recipes again
             for (int startRow = 0; startRow <= 2; startRow++) {
                 for (int startCol = 0; startCol <= 2; startCol++) {
                     CraftingContainer craftingContainer = new TransientCraftingContainer(AdvancedCraftingMenu.this, 3, 3);
@@ -184,30 +227,50 @@ public class AdvancedCraftingMenu extends AbstractContainerMenu {
                             .getRecipeFor(RecipeType.CRAFTING, craftingContainer, level);
 
                     if (recipe.isPresent()) {
-                        // Consume ingredients from this 3x3 area
-                        for (int row = 0; row < 3; row++) {
-                            for (int col = 0; col < 3; col++) {
-                                int gridIndex = (startRow + row) * 5 + (startCol + col);
-                                ItemStack currentStack = blockEntity.getItemHandler().getStackInSlot(gridIndex);
-                                if (!currentStack.isEmpty()) {
-                                    // Handle container items (like buckets)
-                                    if (currentStack.hasCraftingRemainingItem()) {
-                                        ItemStack remainingItem = currentStack.getCraftingRemainingItem();
-                                        currentStack.shrink(1);
-                                        if (currentStack.isEmpty()) {
-                                            blockEntity.getItemHandler().setStackInSlot(gridIndex, remainingItem);
-                                        } else {
-                                            // Try to add remaining item to inventory or drop it
-                                            // For simplicity, we'll just shrink for now
-                                        }
-                                    } else {
-                                        currentStack.shrink(1);
-                                        blockEntity.getItemHandler().setStackInSlot(gridIndex, currentStack);
-                                    }
-                                }
+                        // Count non-empty items in this recipe
+                        int itemCount = 0;
+                        for (int i = 0; i < 9; i++) {
+                            if (!craftingContainer.getItem(i).isEmpty()) {
+                                itemCount++;
                             }
                         }
-                        return; // Found and consumed the recipe, exit
+
+                        ItemStack result = recipe.get().assemble(craftingContainer, level.registryAccess());
+                        validRecipes.add(new ValidRecipe(recipe.get(), result, itemCount, startRow, startCol));
+                    }
+                }
+            }
+
+            // Find the recipe that uses the most items (same priority logic)
+            if (!validRecipes.isEmpty()) {
+                ValidRecipe bestRecipe = validRecipes.get(0);
+                for (ValidRecipe recipe : validRecipes) {
+                    if (recipe.itemCount > bestRecipe.itemCount) {
+                        bestRecipe = recipe;
+                    }
+                }
+
+                // Consume ingredients from the best recipe's 3x3 area
+                for (int row = 0; row < 3; row++) {
+                    for (int col = 0; col < 3; col++) {
+                        int gridIndex = (bestRecipe.startRow + row) * 5 + (bestRecipe.startCol + col);
+                        ItemStack currentStack = blockEntity.getItemHandler().getStackInSlot(gridIndex);
+                        if (!currentStack.isEmpty()) {
+                            // Handle container items (like buckets)
+                            if (currentStack.hasCraftingRemainingItem()) {
+                                ItemStack remainingItem = currentStack.getCraftingRemainingItem();
+                                currentStack.shrink(1);
+                                if (currentStack.isEmpty()) {
+                                    blockEntity.getItemHandler().setStackInSlot(gridIndex, remainingItem);
+                                } else {
+                                    // Try to add remaining item to inventory or drop it
+                                    // For simplicity, we'll just shrink for now
+                                }
+                            } else {
+                                currentStack.shrink(1);
+                                blockEntity.getItemHandler().setStackInSlot(gridIndex, currentStack);
+                            }
+                        }
                     }
                 }
             }
