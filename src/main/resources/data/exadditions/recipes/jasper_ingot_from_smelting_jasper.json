@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:smelting",
+  "category": "misc",
+  "cookingtime": 50,
+  "experience": 7,
+  "group": "sapphire",
+  "ingredient": {
+    "item": "exadditions:jasper"
+  },
+  "result": "exadditions:jasper_ingot"
+}
