@@ -72,6 +72,9 @@ public final class ModNetworking {
         CHANNEL.registerMessage(id(), AdaptationWheelPacket.class,
                 AdaptationWheelPacket::encode, AdaptationWheelPacket::decode, AdaptationWheelPacket::handle);
 
+        CHANNEL.registerMessage(id(), WorldSlashPacket.class,
+                WorldSlashPacket::encode, WorldSlashPacket::decode, WorldSlashPacket::handle);
+
     }
 
 
