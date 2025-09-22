@@ -154,9 +154,16 @@ public class WorldSlasherItem extends Item {
                     double damageWidth = 8.0 * sizeMultiplier;
                     double damageHeight = 6.0 * sizeMultiplier;
 
+                    // Create horizontal hitbox that matches the visual
+                    Vec3 right = direction.cross(new Vec3(0, 1, 0)).normalize();
+                    if (right.length() < 0.1) {
+                        right = direction.cross(new Vec3(1, 0, 0)).normalize();
+                    }
+
+                    // Horizontal slash area - wider perpendicular to movement direction
                     AABB damageArea = new AABB(
-                            currentPos.x - damageWidth/2, currentPos.y - damageHeight/2, currentPos.z - damageWidth/2,
-                            currentPos.x + damageWidth/2, currentPos.y + damageHeight/2, currentPos.z + damageWidth/2
+                            currentPos.x - damageWidth * 0.6, currentPos.y - 2.0, currentPos.z - damageWidth * 0.6,
+                            currentPos.x + damageWidth * 0.6, currentPos.y + 2.0, currentPos.z + damageWidth * 0.6
                     );
 
                     List<Entity> entities = level.getEntitiesOfClass(Entity.class, damageArea);
@@ -164,10 +171,24 @@ public class WorldSlasherItem extends Item {
                     for (Entity entity : entities) {
                         if (entity == attacker || !entity.isAlive()) continue;
 
-                        double entityDistance = entity.getEyePosition().distanceTo(currentPos);
-                        if (entityDistance <= damageWidth/2 && entity instanceof LivingEntity livingEntity) {
+                        Vec3 entityPos = entity.getEyePosition();
+
+                        // Check if entity is in the horizontal slash area
+                        Vec3 toEntity = entityPos.subtract(currentPos);
+
+                        // Project the entity position onto the slash plane
+                        double rightDistance = Math.abs(toEntity.dot(right));
+                        double forwardDistance = Math.abs(toEntity.dot(direction));
+                        double verticalDistance = Math.abs(toEntity.y - currentPos.y);
+
+                        // Entity is hit if it's within the crescent shape
+                        if (rightDistance <= damageWidth * 0.6 &&
+                                forwardDistance <= damageWidth * 0.4 &&
+                                verticalDistance <= 2.0 &&
+                                entity instanceof LivingEntity livingEntity) {
+
                             float baseDamage = (float)FLYING_SLASH_DAMAGE;
-                            float distanceMultiplier = (float)(1.0 - (entityDistance / (damageWidth/2)));
+                            float distanceMultiplier = (float)(1.0 - (rightDistance / (damageWidth * 0.6)));
                             float finalDamage = Math.max(5.0f, baseDamage * distanceMultiplier);
 
                             livingEntity.hurt(level.damageSources().playerAttack(attacker), finalDamage);
@@ -197,35 +218,55 @@ public class WorldSlasherItem extends Item {
     }
 
     private void createCurvedSlashParticles(ServerLevel level, Vec3 playerPos, Vec3 lookDirection) {
+        // Create horizontal particle pattern matching the visual
         Vec3 right = lookDirection.cross(new Vec3(0, 1, 0)).normalize();
         if (right.length() < 0.1) {
             right = lookDirection.cross(new Vec3(1, 0, 0)).normalize();
         }
+        Vec3 forward = lookDirection.normalize();
 
-        for (int i = 0; i < 20; i++) {
-            double angle = Math.PI * (i / 20.0 - 0.5) * 0.9;
-            double x = Math.sin(angle) * CURVED_SLASH_RADIUS;
-            double z = Math.cos(angle) * CURVED_SLASH_RADIUS;
+        // Generate particles along the horizontal crescent
+        int particleCount = 25;
+        double arcSpan = Math.PI * 1.2;
+        double startAngle = -arcSpan / 2;
 
-            Vec3 particlePos = playerPos.add(right.scale(x)).add(lookDirection.scale(z));
+        for (int i = 0; i < particleCount; i++) {
+            double t = (double) i / (particleCount - 1);
+            double angle = startAngle + (arcSpan * t);
+
+            double crescentProfile = Math.sin(t * Math.PI);
+            double particleRadius = CURVED_SLASH_RADIUS * (0.7 + 0.5 * crescentProfile);
+            double forwardOffset = Math.sin(t * Math.PI) * CURVED_SLASH_RADIUS * 0.3;
+
+            Vec3 particlePos = playerPos
+                    .add(right.scale(Math.cos(angle) * particleRadius))
+                    .add(new Vec3(0, Math.sin(angle) * particleRadius * 0.1, 0))
+                    .add(forward.scale(forwardOffset));
 
             if (i % 2 == 0) {
-                level.sendParticles(ParticleTypes.LARGE_SMOKE, particlePos.x, particlePos.y, particlePos.z, 2, 0.2, 0.2, 0.2, 0.02);
+                level.sendParticles(ParticleTypes.LARGE_SMOKE,
+                        particlePos.x, particlePos.y, particlePos.z,
+                        2, 0.2, 0.2, 0.2, 0.02);
             } else {
-                level.sendParticles(ParticleTypes.END_ROD, particlePos.x, particlePos.y, particlePos.z, 1, 0.15, 0.15, 0.15, 0.05);
+                level.sendParticles(ParticleTypes.END_ROD,
+                        particlePos.x, particlePos.y, particlePos.z,
+                        1, 0.15, 0.15, 0.15, 0.05);
             }
         }
     }
 
     private void damageCurvedSlashEntities(ServerLevel level, Vec3 playerPos, Vec3 lookDirection, Player attacker) {
+        // Create horizontal damage area matching the visual
         Vec3 right = lookDirection.cross(new Vec3(0, 1, 0)).normalize();
         if (right.length() < 0.1) {
             right = lookDirection.cross(new Vec3(1, 0, 0)).normalize();
         }
+        Vec3 forward = lookDirection.normalize();
 
+        // Create a wider damage area for the horizontal slash
         AABB damageArea = new AABB(
-                playerPos.x - CURVED_SLASH_RADIUS - 1, playerPos.y - 3, playerPos.z - CURVED_SLASH_RADIUS - 1,
-                playerPos.x + CURVED_SLASH_RADIUS + 1, playerPos.y + 3, playerPos.z + CURVED_SLASH_RADIUS + 1
+                playerPos.x - CURVED_SLASH_RADIUS * 1.5, playerPos.y - 2.5, playerPos.z - CURVED_SLASH_RADIUS * 1.5,
+                playerPos.x + CURVED_SLASH_RADIUS * 1.5, playerPos.y + 2.5, playerPos.z + CURVED_SLASH_RADIUS * 1.5
         );
 
         List<Entity> entities = level.getEntitiesOfClass(Entity.class, damageArea);
@@ -234,24 +275,43 @@ public class WorldSlasherItem extends Item {
             if (entity == attacker || !entity.isAlive()) continue;
 
             Vec3 entityPos = entity.getEyePosition();
-            double distanceFromPlayer = entityPos.distanceTo(playerPos);
+            Vec3 toEntity = entityPos.subtract(playerPos);
 
-            if (distanceFromPlayer <= CURVED_SLASH_RADIUS + 1 && entity instanceof LivingEntity livingEntity) {
-                Vec3 toEntity = entityPos.subtract(playerPos).normalize();
-                Vec3 entityRight = toEntity.cross(new Vec3(0, 1, 0));
-                double dotProduct = Math.abs(entityRight.dot(right));
+            // Check if entity is within the horizontal crescent shape
+            double rightDistance = Math.abs(toEntity.dot(right));
+            double forwardDistance = toEntity.dot(forward);
+            double verticalDistance = Math.abs(toEntity.y - playerPos.y);
 
-                if (dotProduct > 0.3) {
-                    float damage = (float)(CURVED_SLASH_DAMAGE * (1.0 - distanceFromPlayer / CURVED_SLASH_RADIUS));
-                    damage = Math.max(3.0f, damage);
+            // Calculate if entity is in the crescent area
+            double distanceFromCenter = toEntity.length();
 
-                    livingEntity.hurt(level.damageSources().playerAttack(attacker), damage);
+            if (distanceFromCenter <= CURVED_SLASH_RADIUS * 1.3 &&
+                    rightDistance <= CURVED_SLASH_RADIUS * 1.2 &&
+                    forwardDistance >= -CURVED_SLASH_RADIUS * 0.3 &&
+                    forwardDistance <= CURVED_SLASH_RADIUS * 0.8 &&
+                    verticalDistance <= 2.5 &&
+                    entity instanceof LivingEntity livingEntity) {
 
-                    Vec3 knockback = toEntity.scale(1.2).add(0, 0.2, 0);
-                    entity.setDeltaMovement(entity.getDeltaMovement().add(knockback));
+                // Calculate damage based on position in the slash
+                double normalizedRight = rightDistance / (CURVED_SLASH_RADIUS * 1.2);
+                double crescentMultiplier = 1.0 - (normalizedRight * normalizedRight); // Stronger at center
 
-                    livingEntity.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 60, 0));
-                }
+                float damage = (float)(CURVED_SLASH_DAMAGE * crescentMultiplier * (1.0 - distanceFromCenter / (CURVED_SLASH_RADIUS * 1.3)));
+                damage = Math.max(3.0f, damage);
+
+                livingEntity.hurt(level.damageSources().playerAttack(attacker), damage);
+
+                // Knockback perpendicular to the slash direction
+                Vec3 knockback = right.scale(Math.signum(toEntity.dot(right)) * 1.5)
+                        .add(forward.scale(0.8))
+                        .add(0, 0.3, 0);
+                entity.setDeltaMovement(entity.getDeltaMovement().add(knockback));
+
+                livingEntity.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 60, 0));
+
+                // Spawn hit particles
+                level.sendParticles(ParticleTypes.CRIT, entityPos.x, entityPos.y, entityPos.z,
+                        3, 0.3, 0.3, 0.3, 0.1);
             }
         }
     }
@@ -259,5 +319,4 @@ public class WorldSlasherItem extends Item {
     @Override
     public boolean isFoil(ItemStack stack) {
         return true;
-    }
-}
+    }}

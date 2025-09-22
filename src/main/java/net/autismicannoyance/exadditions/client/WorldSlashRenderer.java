@@ -1,6 +1,5 @@
 package net.autismicannoyance.exadditions.client;
 
-import net.autismicannoyance.exadditions.client.VectorRenderer;
 import net.autismicannoyance.exadditions.network.WorldSlashPacket;
 import net.minecraft.world.phys.Vec3;
 
@@ -28,155 +27,152 @@ public class WorldSlashRenderer {
         }
     }
 
+    /* ---------------------------
+       Curved slash (stationary)
+       --------------------------- */
     private static void renderCurvedSlash(Vec3 playerPos, Vec3 lookDirection, double radius) {
-        // Create multiple layers for a 3D effect like in the reference
         int layers = 8;
         double layerSpacing = 0.03;
 
         for (int layer = 0; layer < layers; layer++) {
             double layerOffset = layer * layerSpacing;
-            double layerAlpha = 1.0 - (layer * 0.1); // Fade outer layers
-
-            // Main curved slash body
+            double layerAlpha = 1.0 - (layer * 0.1);
             renderSlashLayer(playerPos, lookDirection, radius, layerOffset, layerAlpha);
         }
 
-        // Add bright core glow
         renderSlashCore(playerPos, lookDirection, radius);
-
-        // Add energy particles along the arc
         renderSlashParticles(playerPos, lookDirection, radius);
     }
 
+    /**
+     * Horizontal-plane crescent. Key change:
+     * arcDir = forwardFlat * cos(angle) + right * sin(angle)
+     * so angle==0 => arcDir points forward (in front of player).
+     */
     private static void renderSlashLayer(Vec3 center, Vec3 lookDirection, double radius, double offset, double alphaMultiplier) {
-        // Calculate perpendicular vectors for proper 3D orientation
-        Vec3 right = lookDirection.cross(new Vec3(0, 1, 0)).normalize();
-        if (right.length() < 0.1) {
-            right = lookDirection.cross(new Vec3(1, 0, 0)).normalize();
-        }
-        Vec3 up = right.cross(lookDirection).normalize();
+        Vec3 forward = safeNormalize(lookDirection);
+        Vec3 worldUp = new Vec3(0, 1, 0);
 
-        // Generate the curved slash arc points
+        // keep the arc parallel to ground
+        Vec3 forwardFlat = new Vec3(forward.x, 0.0, forward.z);
+        if (forwardFlat.length() < 1e-6) forwardFlat = safeNormalize(forward);
+        else forwardFlat = safeNormalize(forwardFlat);
+
+        // RIGHT should be forward x up (so it points the expected lateral direction)
+        Vec3 right = safeNormalize(forwardFlat.cross(worldUp));
+        Vec3 up = worldUp;
+
+        // move the whole arc forward so it sits in front of the player
+        double forwardOffsetFactor = 0.5;
+        Vec3 origin = center.add(forwardFlat.scale(radius * forwardOffsetFactor + offset)).add(up.scale(-0.18));
+
         List<Vec3> innerArc = new ArrayList<>();
         List<Vec3> outerArc = new ArrayList<>();
 
-        int segments = 60; // High resolution for smooth curve
-        double arcAngle = Math.PI * 0.7; // About 126 degrees for a nice curved sweep
-        double startAngle = -arcAngle / 2;
+        int segments = 40;
+        double arcSpan = Math.PI * 0.8;
+        double startAngle = -arcSpan / 2.0;
 
         for (int i = 0; i <= segments; i++) {
             double t = (double) i / segments;
-            double angle = startAngle + (arcAngle * t);
+            double angle = startAngle + (arcSpan * t);
 
-            // Create the crescent shape with proper 3D curvature
-            double crescentProfile = Math.sin(t * Math.PI); // Peak in middle
-            double innerRadius = radius * 0.7 * (0.2 + 0.8 * crescentProfile);
-            double outerRadius = radius * (0.3 + 0.7 * crescentProfile);
+            double thickness = Math.sin(t * Math.PI) * 0.3 + 0.1;
+            double baseRadius = radius;
 
-            // Apply slight forward curve for 3D effect
-            double forwardOffset = Math.sin(angle) * radius * 0.15;
+            double innerRadius = baseRadius * (0.7 - thickness);
+            double outerRadius = baseRadius * (0.7 + thickness);
 
-            // Calculate positions with 3D rotation
-            Vec3 basePoint = center
-                    .add(right.scale(Math.cos(angle) * radius))
-                    .add(up.scale(Math.sin(angle) * radius * 0.3)) // Slight vertical curve
-                    .add(lookDirection.scale(forwardOffset + offset));
+            // IMPORTANT: forwardFlat * cos + right * sin so center faces forward
+            Vec3 arcDir = forwardFlat.scale(Math.cos(angle)).add(right.scale(Math.sin(angle)));
 
-            // Inner edge point
-            Vec3 innerPoint = center
-                    .add(right.scale(Math.cos(angle) * innerRadius))
-                    .add(up.scale(Math.sin(angle) * innerRadius * 0.3))
-                    .add(lookDirection.scale(forwardOffset * 0.7 + offset));
+            double verticalBulge = Math.sin(t * Math.PI) * radius * 0.06;
+            Vec3 bulge = up.scale(verticalBulge);
 
-            // Outer edge point
-            Vec3 outerPoint = center
-                    .add(right.scale(Math.cos(angle) * outerRadius))
-                    .add(up.scale(Math.sin(angle) * outerRadius * 0.3))
-                    .add(lookDirection.scale(forwardOffset * 1.2 + offset));
+            Vec3 innerPoint = origin.add(arcDir.scale(innerRadius)).add(bulge);
+            Vec3 outerPoint = origin.add(arcDir.scale(outerRadius)).add(bulge);
 
             innerArc.add(innerPoint);
             outerArc.add(outerPoint);
         }
 
-        // Render the slash surface with gradient coloring
         for (int i = 0; i < segments; i++) {
             Vec3 innerCurrent = innerArc.get(i);
             Vec3 innerNext = innerArc.get(i + 1);
             Vec3 outerCurrent = outerArc.get(i);
             Vec3 outerNext = outerArc.get(i + 1);
 
-            // Calculate gradient alpha based on position
-            double positionAlpha = 1.0 - (Math.abs(i - segments/2.0) / (segments/2.0)) * 0.3;
-            int alpha = (int)(255 * alphaMultiplier * positionAlpha * 0.85);
+            double positionAlpha = 1.0 - (Math.abs(i - segments / 2.0) / (segments / 2.0)) * 0.3;
+            int alpha = (int) (255 * alphaMultiplier * positionAlpha * 0.85);
 
-            // Cyan-white gradient color like the reference
-            int r = 200 + (int)(55 * positionAlpha);
+            int r = 200 + (int) (55 * positionAlpha);
             int g = 255;
             int b = 255;
             int color = (alpha << 24) | (r << 16) | (g << 8) | b;
 
-            // Create quad with per-vertex colors for gradient
             int[] colors = {color, color, color};
 
-            // First triangle
             VectorRenderer.drawPlaneWorld(innerCurrent, outerCurrent, outerNext, colors, true, 40, VectorRenderer.Transform.IDENTITY);
-            // Second triangle
             VectorRenderer.drawPlaneWorld(innerCurrent, outerNext, innerNext, colors, true, 40, VectorRenderer.Transform.IDENTITY);
         }
 
-        // Add edge glow lines
-        if (offset < 0.01) { // Only on the main layer
+        if (offset < 0.01) {
             renderSlashEdgeGlow(innerArc, outerArc);
         }
     }
 
     private static void renderSlashCore(Vec3 center, Vec3 lookDirection, double radius) {
-        Vec3 right = lookDirection.cross(new Vec3(0, 1, 0)).normalize();
-        if (right.length() < 0.1) {
-            right = lookDirection.cross(new Vec3(1, 0, 0)).normalize();
-        }
-        Vec3 up = right.cross(lookDirection).normalize();
+        Vec3 forward = safeNormalize(lookDirection);
+        Vec3 worldUp = new Vec3(0, 1, 0);
 
-        // Create bright white core line through the middle
+        Vec3 forwardFlat = new Vec3(forward.x, 0.0, forward.z);
+        if (forwardFlat.length() < 1e-6) forwardFlat = safeNormalize(forward);
+        else forwardFlat = safeNormalize(forwardFlat);
+
+        Vec3 right = safeNormalize(forwardFlat.cross(worldUp));
+        Vec3 up = worldUp;
+
+        double forwardOffsetFactor = 0.5;
+        Vec3 origin = center.add(forwardFlat.scale(radius * forwardOffsetFactor)).add(up.scale(-0.18));
+
         List<Vec3> coreLine = new ArrayList<>();
         int segments = 40;
-        double arcAngle = Math.PI * 0.65;
-        double startAngle = -arcAngle / 2;
+        double arcSpan = Math.PI * 1.1;
+        double startAngle = -arcSpan / 2.0;
 
         for (int i = 0; i <= segments; i++) {
             double t = (double) i / segments;
-            double angle = startAngle + (arcAngle * t);
+            double angle = startAngle + (arcSpan * t);
 
             double crescentProfile = Math.sin(t * Math.PI);
-            double coreRadius = radius * 0.85 * (0.3 + 0.7 * crescentProfile);
-            double forwardOffset = Math.sin(angle) * radius * 0.1;
+            double coreRadius = radius * 0.95 * (0.4 + 0.6 * crescentProfile);
+            double forwardOffset = Math.sin(t * Math.PI) * radius * 0.18;
 
-            Vec3 corePoint = center
-                    .add(right.scale(Math.cos(angle) * coreRadius))
-                    .add(up.scale(Math.sin(angle) * coreRadius * 0.3))
-                    .add(lookDirection.scale(forwardOffset));
+            // again use forwardFlat*cos + right*sin
+            Vec3 point = origin
+                    .add(forwardFlat.scale(Math.cos(angle) * coreRadius))
+                    .add(right.scale(Math.sin(angle) * coreRadius * 0.05))
+                    .add(forwardFlat.scale(forwardOffset));
 
-            coreLine.add(corePoint);
+            coreLine.add(point);
         }
 
-        // Render bright white core
         for (int i = 0; i < coreLine.size() - 1; i++) {
             VectorRenderer.drawLineWorld(
                     coreLine.get(i),
                     coreLine.get(i + 1),
-                    0xFFFFFFFF, // Pure white
-                    4.0f,
+                    0xFFFFFFFF,
+                    6.0f,
                     true,
                     40,
                     VectorRenderer.Transform.IDENTITY
             );
 
-            // Add secondary glow line
             VectorRenderer.drawLineWorld(
                     coreLine.get(i),
                     coreLine.get(i + 1),
-                    0x8000FFFF, // Semi-transparent cyan
-                    8.0f,
+                    0x8000FFFF,
+                    12.0f,
                     true,
                     40,
                     VectorRenderer.Transform.IDENTITY
@@ -185,50 +181,44 @@ public class WorldSlashRenderer {
     }
 
     private static void renderSlashEdgeGlow(List<Vec3> innerArc, List<Vec3> outerArc) {
-        // Bright edge highlights
         for (int i = 0; i < innerArc.size() - 1; i++) {
-            // Inner edge glow
             VectorRenderer.drawLineWorld(
                     innerArc.get(i),
                     innerArc.get(i + 1),
-                    0xCCFFFFFF, // Bright white-cyan
-                    2.0f,
+                    0xCCFFFFFF,
+                    3.0f,
                     true,
                     40,
                     VectorRenderer.Transform.IDENTITY
             );
 
-            // Outer edge glow
             VectorRenderer.drawLineWorld(
                     outerArc.get(i),
                     outerArc.get(i + 1),
-                    0xCC00FFFF, // Bright cyan
-                    3.0f,
+                    0xCC00FFFF,
+                    4.0f,
                     true,
                     40,
                     VectorRenderer.Transform.IDENTITY
             );
         }
 
-        // Add end caps
         if (!innerArc.isEmpty() && !outerArc.isEmpty()) {
-            // Start cap
             VectorRenderer.drawLineWorld(
                     innerArc.get(0),
                     outerArc.get(0),
                     0xAAFFFFFF,
-                    2.0f,
+                    3.0f,
                     true,
                     40,
                     VectorRenderer.Transform.IDENTITY
             );
 
-            // End cap
             VectorRenderer.drawLineWorld(
                     innerArc.get(innerArc.size() - 1),
                     outerArc.get(outerArc.size() - 1),
                     0xAAFFFFFF,
-                    2.0f,
+                    3.0f,
                     true,
                     40,
                     VectorRenderer.Transform.IDENTITY
@@ -237,48 +227,57 @@ public class WorldSlashRenderer {
     }
 
     private static void renderSlashParticles(Vec3 center, Vec3 lookDirection, double radius) {
-        Vec3 right = lookDirection.cross(new Vec3(0, 1, 0)).normalize();
-        if (right.length() < 0.1) {
-            right = lookDirection.cross(new Vec3(1, 0, 0)).normalize();
-        }
-        Vec3 up = right.cross(lookDirection).normalize();
+        Vec3 forward = safeNormalize(lookDirection);
+        Vec3 worldUp = new Vec3(0, 1, 0);
 
-        // Add energy particles along the slash
-        int particleCount = 15;
-        double arcAngle = Math.PI * 0.7;
-        double startAngle = -arcAngle / 2;
+        Vec3 forwardFlat = new Vec3(forward.x, 0.0, forward.z);
+        if (forwardFlat.length() < 1e-6) forwardFlat = safeNormalize(forward);
+        else forwardFlat = safeNormalize(forwardFlat);
+
+        Vec3 right = safeNormalize(forwardFlat.cross(worldUp));
+        Vec3 up = worldUp;
+
+        double forwardOffsetFactor = 0.5;
+        Vec3 origin = center.add(forwardFlat.scale(radius * forwardOffsetFactor)).add(up.scale(-0.18));
+
+        int particleCount = 20;
+        double arcSpan = Math.PI * 1.1;
+        double startAngle = -arcSpan / 2.0;
 
         for (int i = 0; i < particleCount; i++) {
             double t = (double) i / (particleCount - 1);
-            double angle = startAngle + (arcAngle * t);
+            double angle = startAngle + (arcSpan * t);
 
             double crescentProfile = Math.sin(t * Math.PI);
-            double particleRadius = radius * (0.5 + 0.5 * crescentProfile + Math.random() * 0.2);
-            double forwardOffset = Math.sin(angle) * radius * 0.1;
+            double particleRadius = radius * (0.7 + 0.5 * crescentProfile + Math.random() * 0.3);
+            double forwardOffset = Math.sin(t * Math.PI) * radius * 0.12;
 
-            Vec3 particlePos = center
-                    .add(right.scale(Math.cos(angle) * particleRadius))
-                    .add(up.scale(Math.sin(angle) * particleRadius * 0.3))
-                    .add(lookDirection.scale(forwardOffset));
+            Vec3 particlePos = origin
+                    .add(forwardFlat.scale(Math.cos(angle) * particleRadius))
+                    .add(right.scale(Math.sin(angle) * particleRadius * 0.02))
+                    .add(up.scale(Math.sin(angle) * particleRadius * 0.03))
+                    .add(forwardFlat.scale(forwardOffset));
 
-            // Small glowing sphere particles
             VectorRenderer.drawSphereWorld(
                     particlePos,
-                    0.03f + (float)(Math.random() * 0.02),
-                    0xBB00FFFF, // Cyan glow
+                    0.04f + (float) (Math.random() * 0.03),
+                    0xBB00FFFF,
                     6, 8,
                     false,
-                    30 + (int)(Math.random() * 20),
+                    30 + (int) (Math.random() * 20),
                     VectorRenderer.Transform.IDENTITY
             );
         }
     }
 
+    /* ---------------------------
+       Flying slash (projectile)
+       --------------------------- */
     private static void startFlyingSlash(Vec3 startPos, Vec3 direction, double width, double height, double range) {
         int slashId = nextSlashId++;
         slashStartTimes.put(slashId, System.currentTimeMillis());
 
-        FlyingSlash flyingSlash = new FlyingSlash(slashId, startPos, direction, width, height, range);
+        FlyingSlash flyingSlash = new FlyingSlash(slashId, startPos, safeNormalize(direction), width, height, range);
         flyingSlashes.add(flyingSlash);
     }
 
@@ -302,65 +301,63 @@ public class WorldSlashRenderer {
         double totalDuration = slash.range / slashSpeed;
 
         if (elapsedSeconds > totalDuration) {
-            return true; // Expired
+            return true;
         }
 
-        // Calculate current position
         Vec3 currentPos = slash.startPos.add(slash.direction.scale(elapsedSeconds * slashSpeed));
 
-        // Size grows over time
         double progress = elapsedSeconds / totalDuration;
         double sizeMultiplier = 1.0 + (progress * 0.5);
         double currentWidth = slash.width * sizeMultiplier;
 
-        // Render the flying slash with similar style
         renderFlyingSlashEffect(currentPos, slash.direction, currentWidth, progress);
 
-        return false; // Not expired
+        return false;
     }
 
     private static void renderFlyingSlashEffect(Vec3 center, Vec3 direction, double width, double progress) {
-        // Create a smaller version of the curved slash that flies forward
-        Vec3 right = direction.cross(new Vec3(0, 1, 0)).normalize();
-        if (right.length() < 0.1) {
-            right = direction.cross(new Vec3(1, 0, 0)).normalize();
-        }
-        Vec3 up = right.cross(direction).normalize();
+        Vec3 forward = safeNormalize(direction);
+        Vec3 worldUp = new Vec3(0, 1, 0);
 
-        // Generate flying slash arc
+        Vec3 forwardFlat = new Vec3(forward.x, 0.0, forward.z);
+        if (forwardFlat.length() < 1e-6) forwardFlat = safeNormalize(forward);
+        else forwardFlat = safeNormalize(forwardFlat);
+
+        Vec3 right = safeNormalize(forwardFlat.cross(worldUp));
+        Vec3 up = worldUp;
+
+        Vec3 origin = center.add(forwardFlat.scale(width * 0.6)).add(up.scale(-0.18));
+
         List<Vec3> innerArc = new ArrayList<>();
         List<Vec3> outerArc = new ArrayList<>();
 
-        int segments = 30;
-        double arcAngle = Math.PI * 0.5; // Smaller arc for flying slash
-        double startAngle = -arcAngle / 2;
+        int segments = 20;
+        double arcSpan = Math.PI * 0.6;
+        double startAngle = -arcSpan / 2.0;
 
         for (int i = 0; i <= segments; i++) {
             double t = (double) i / segments;
-            double angle = startAngle + (arcAngle * t);
+            double angle = startAngle + (arcSpan * t);
 
-            double crescentProfile = Math.sin(t * Math.PI);
-            double innerRadius = width * 0.3 * (0.2 + 0.8 * crescentProfile);
-            double outerRadius = width * 0.5 * (0.3 + 0.7 * crescentProfile);
+            double thickness = Math.sin(t * Math.PI) * 0.2 + 0.05;
+            double baseRadius = width * 0.4;
 
-            Vec3 innerPoint = center
-                    .add(right.scale(Math.cos(angle) * innerRadius))
-                    .add(up.scale(Math.sin(angle) * innerRadius * 0.2));
+            double innerRadius = baseRadius * (0.8 - thickness);
+            double outerRadius = baseRadius * (0.8 + thickness);
 
-            Vec3 outerPoint = center
-                    .add(right.scale(Math.cos(angle) * outerRadius))
-                    .add(up.scale(Math.sin(angle) * outerRadius * 0.2));
+            Vec3 arcDir = forwardFlat.scale(Math.cos(angle)).add(right.scale(Math.sin(angle)));
+
+            Vec3 innerPoint = origin.add(arcDir.scale(innerRadius));
+            Vec3 outerPoint = origin.add(arcDir.scale(outerRadius));
 
             innerArc.add(innerPoint);
             outerArc.add(outerPoint);
         }
 
-        // Render with fading alpha based on progress
-        int alpha = (int)(255 * (1.0 - progress * 0.5));
-        int color = (alpha << 24) | 0x00FFFF; // Cyan
-
+        int alpha = (int) (255 * (1.0 - progress * 0.5));
+        int baseColor = (alpha << 24) | 0x00FFFF;
         for (int i = 0; i < segments; i++) {
-            int[] colors = {color, color, color};
+            int[] colors = {baseColor, baseColor, baseColor};
 
             VectorRenderer.drawPlaneWorld(
                     innerArc.get(i), outerArc.get(i), outerArc.get(i + 1),
@@ -372,17 +369,24 @@ public class WorldSlashRenderer {
             );
         }
 
-        // Add core glow
         for (int i = 0; i < innerArc.size() - 1; i++) {
             Vec3 midPoint = innerArc.get(i).add(outerArc.get(i)).scale(0.5);
             Vec3 midPointNext = innerArc.get(i + 1).add(outerArc.get(i + 1)).scale(0.5);
 
             VectorRenderer.drawLineWorld(
                     midPoint, midPointNext,
-                    (alpha << 24) | 0xFFFFFF, // White core
+                    (alpha << 24) | 0xFFFFFF,
                     3.0f, true, 5, VectorRenderer.Transform.IDENTITY
             );
         }
+    }
+
+    // helper: safely normalize Vec3 (avoid zero-length)
+    private static Vec3 safeNormalize(Vec3 v) {
+        if (v == null) return new Vec3(0, 0, 1);
+        double len = v.length();
+        if (len < 1e-6) return new Vec3(0, 0, 1);
+        return v.scale(1.0 / len);
     }
 
     // Flying slash data class
