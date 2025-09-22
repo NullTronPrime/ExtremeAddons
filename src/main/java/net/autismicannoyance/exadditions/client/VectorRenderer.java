@@ -150,6 +150,10 @@ public class VectorRenderer {
         Vec3 camPos = cam.getPosition();
         float partialTick = event.getPartialTick();
 
+
+        // Update flying slashes every frame//not needed for other methords
+        net.autismicannoyance.exadditions.client.WorldSlashRenderer.updateFlyingSlashes();
+
         Tesselator tess = Tesselator.getInstance();
         BufferBuilder buffer = tess.getBuilder();
         Matrix4f matrix = event.getPoseStack().last().pose();

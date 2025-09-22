@@ -21,6 +21,9 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.PacketDistributor;
 
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class WorldSlasherItem extends Item {
     private static final int CURVED_SLASH_COOLDOWN = 20;
@@ -29,6 +32,9 @@ public class WorldSlasherItem extends Item {
     private static final double CURVED_SLASH_DAMAGE = 12.0;
     private static final double FLYING_SLASH_DAMAGE = 20.0;
     private static final double FLYING_SLASH_RANGE = 50.0;
+
+    // Executor for scheduled damage tasks
+    private static final ScheduledExecutorService executor = Executors.newScheduledThreadPool(4);
 
     public WorldSlasherItem(Item.Properties properties) {
         super(properties);
@@ -108,6 +114,7 @@ public class WorldSlasherItem extends Item {
         Vec3 lookDirection = player.getLookAngle();
         Vec3 startPos = playerPos.add(lookDirection.scale(2.0));
 
+        // Send visual effect to clients
         ModNetworking.CHANNEL.send(
                 PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> player),
                 new WorldSlashPacket(
@@ -121,7 +128,72 @@ public class WorldSlasherItem extends Item {
         level.playSound(null, player.blockPosition(), SoundEvents.WITHER_SPAWN, SoundSource.PLAYERS, 1.2f, 0.8f);
         level.playSound(null, player.blockPosition(), SoundEvents.GENERIC_EXPLODE, SoundSource.PLAYERS, 1.5f, 0.5f);
 
-        createFlyingSlashDamage(level, startPos, lookDirection, player);
+        // Schedule damage over time instead of instant damage
+        scheduleFlyingSlashDamage(level, startPos, lookDirection, player);
+    }
+
+    // New method to handle damage over time for the flying slash
+    private void scheduleFlyingSlashDamage(ServerLevel level, Vec3 startPos, Vec3 direction, Player attacker) {
+        final double slashSpeed = 0.8; // blocks per tick
+        final int tickInterval = 2; // Apply damage every 2 ticks (100ms)
+        final int maxTicks = (int)(FLYING_SLASH_RANGE / slashSpeed);
+
+        for (int tick = 0; tick < maxTicks; tick += tickInterval) {
+            final int currentTick = tick;
+
+            executor.schedule(() -> {
+                // Make sure we're still on the server thread
+                level.getServer().execute(() -> {
+                    if (level.isClientSide) return;
+
+                    double currentDistance = currentTick * slashSpeed;
+                    Vec3 currentPos = startPos.add(direction.scale(currentDistance));
+
+                    double progress = (double)currentTick / maxTicks;
+                    double sizeMultiplier = 0.6 + (progress * 0.8);
+                    double damageWidth = 8.0 * sizeMultiplier;
+                    double damageHeight = 6.0 * sizeMultiplier;
+
+                    AABB damageArea = new AABB(
+                            currentPos.x - damageWidth/2, currentPos.y - damageHeight/2, currentPos.z - damageWidth/2,
+                            currentPos.x + damageWidth/2, currentPos.y + damageHeight/2, currentPos.z + damageWidth/2
+                    );
+
+                    List<Entity> entities = level.getEntitiesOfClass(Entity.class, damageArea);
+
+                    for (Entity entity : entities) {
+                        if (entity == attacker || !entity.isAlive()) continue;
+
+                        double entityDistance = entity.getEyePosition().distanceTo(currentPos);
+                        if (entityDistance <= damageWidth/2 && entity instanceof LivingEntity livingEntity) {
+                            float baseDamage = (float)FLYING_SLASH_DAMAGE;
+                            float distanceMultiplier = (float)(1.0 - (entityDistance / (damageWidth/2)));
+                            float finalDamage = Math.max(5.0f, baseDamage * distanceMultiplier);
+
+                            livingEntity.hurt(level.damageSources().playerAttack(attacker), finalDamage);
+
+                            Vec3 knockback = direction.scale(2.5).add(0, 0.5, 0);
+                            entity.setDeltaMovement(entity.getDeltaMovement().add(knockback));
+
+                            livingEntity.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 80, 1));
+                            livingEntity.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 60, 0));
+
+                            level.sendParticles(ParticleTypes.CRIT, entity.getX(),
+                                    entity.getY() + entity.getBbHeight() * 0.5, entity.getZ(),
+                                    5, 0.5, 0.5, 0.5, 0.15);
+                        }
+                    }
+
+                    // Add particles at current position
+                    if (currentTick % 6 == 0) {
+                        level.sendParticles(ParticleTypes.LARGE_SMOKE, currentPos.x, currentPos.y, currentPos.z,
+                                3, sizeMultiplier, sizeMultiplier, sizeMultiplier, 0.05);
+                        level.sendParticles(ParticleTypes.END_ROD, currentPos.x, currentPos.y, currentPos.z,
+                                2, sizeMultiplier * 0.5, sizeMultiplier * 0.5, sizeMultiplier * 0.5, 0.08);
+                    }
+                });
+            }, currentTick * 50L, TimeUnit.MILLISECONDS); // Convert ticks to milliseconds
+        }
     }
 
     private void createCurvedSlashParticles(ServerLevel level, Vec3 playerPos, Vec3 lookDirection) {
@@ -180,55 +252,6 @@ public class WorldSlasherItem extends Item {
 
                     livingEntity.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 60, 0));
                 }
-            }
-        }
-    }
-
-    private void createFlyingSlashDamage(ServerLevel level, Vec3 startPos, Vec3 direction, Player attacker) {
-        double slashSpeed = 0.8;
-        int lifetime = (int)(FLYING_SLASH_RANGE / slashSpeed);
-
-        for (int tick = 0; tick < lifetime; tick += 3) {
-            Vec3 currentPos = startPos.add(direction.scale(tick * slashSpeed));
-            double sizeMultiplier = 1.0 + (tick * 0.5 / lifetime);
-            double damageWidth = 12.0 * sizeMultiplier;
-            double damageHeight = 8.0 * sizeMultiplier;
-
-            AABB damageArea = new AABB(
-                    currentPos.x - damageWidth/2, currentPos.y - damageHeight/2, currentPos.z - damageWidth/2,
-                    currentPos.x + damageWidth/2, currentPos.y + damageHeight/2, currentPos.z + damageWidth/2
-            );
-
-            List<Entity> entities = level.getEntitiesOfClass(Entity.class, damageArea);
-
-            for (Entity entity : entities) {
-                if (entity == attacker || !entity.isAlive()) continue;
-
-                double entityDistance = entity.getEyePosition().distanceTo(currentPos);
-                if (entityDistance <= damageWidth/2 && entity instanceof LivingEntity livingEntity) {
-                    float baseDamage = (float)FLYING_SLASH_DAMAGE;
-                    float distanceMultiplier = (float)(1.0 - (entityDistance / (damageWidth/2)));
-                    float finalDamage = Math.max(5.0f, baseDamage * distanceMultiplier);
-
-                    livingEntity.hurt(level.damageSources().playerAttack(attacker), finalDamage);
-
-                    Vec3 knockback = direction.scale(2.5).add(0, 0.5, 0);
-                    entity.setDeltaMovement(entity.getDeltaMovement().add(knockback));
-
-                    livingEntity.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 80, 1));
-                    livingEntity.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 60, 0));
-
-                    level.sendParticles(ParticleTypes.CRIT, entity.getX(),
-                            entity.getY() + entity.getBbHeight() * 0.5, entity.getZ(),
-                            5, 0.5, 0.5, 0.5, 0.15);
-                }
-            }
-
-            if (tick % 6 == 0) {
-                level.sendParticles(ParticleTypes.LARGE_SMOKE, currentPos.x, currentPos.y, currentPos.z,
-                        3, sizeMultiplier, sizeMultiplier, sizeMultiplier, 0.05);
-                level.sendParticles(ParticleTypes.END_ROD, currentPos.x, currentPos.y, currentPos.z,
-                        2, sizeMultiplier * 0.5, sizeMultiplier * 0.5, sizeMultiplier * 0.5, 0.08);
             }
         }
     }
