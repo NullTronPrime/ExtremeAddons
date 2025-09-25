@@ -28,250 +28,259 @@ public class WorldSlashRenderer {
     }
 
     /* ---------------------------
-       Curved slash (stationary)
+       Curved slash (stationary) - Enhanced to match the flowing wave image
        --------------------------- */
     private static void renderCurvedSlash(Vec3 playerPos, Vec3 lookDirection, double radius) {
-        int layers = 8;
-        double layerSpacing = 0.03;
+        // Create multiple flowing wave layers with different timings
+        int totalLayers = 12;
+        for (int layer = 0; layer < totalLayers; layer++) {
+            double layerDelay = layer * 2; // Stagger the layers over time
+            double layerAlpha = Math.max(0.1, 1.0 - (layer * 0.08));
+            double layerScale = 1.0 + (layer * 0.05);
 
-        for (int layer = 0; layer < layers; layer++) {
-            double layerOffset = layer * layerSpacing;
-            double layerAlpha = 1.0 - (layer * 0.1);
-            renderSlashLayer(playerPos, lookDirection, radius, layerOffset, layerAlpha);
+            // Schedule each layer to appear slightly delayed
+            scheduleSlashLayer(playerPos, lookDirection, radius, layer, layerAlpha, layerScale, layerDelay);
         }
 
-        renderSlashCore(playerPos, lookDirection, radius);
-        renderSlashParticles(playerPos, lookDirection, radius);
+        // Core energy trail
+        renderSlashEnergyCore(playerPos, lookDirection, radius);
+
+        // Bright particles and energy effects
+        renderSlashEnergyParticles(playerPos, lookDirection, radius);
+    }
+
+    private static void scheduleSlashLayer(Vec3 center, Vec3 lookDirection, double radius, int layerIndex,
+                                           double alphaMultiplier, double scale, double delay) {
+        // For now, render immediately - in a real implementation you'd use a scheduler
+        renderFlowingSlashLayer(center, lookDirection, radius, layerIndex, alphaMultiplier, scale);
     }
 
     /**
-     * Horizontal-plane crescent. Key change:
-     * arcDir = forwardFlat * cos(angle) + right * sin(angle)
-     * so angle==0 => arcDir points forward (in front of player).
+     * Creates a flowing wave effect similar to the reference image
      */
-    private static void renderSlashLayer(Vec3 center, Vec3 lookDirection, double radius, double offset, double alphaMultiplier) {
+    private static void renderFlowingSlashLayer(Vec3 center, Vec3 lookDirection, double radius,
+                                                int layerIndex, double alphaMultiplier, double scale) {
         Vec3 forward = safeNormalize(lookDirection);
         Vec3 worldUp = new Vec3(0, 1, 0);
-
-        // keep the arc parallel to ground
         Vec3 forwardFlat = new Vec3(forward.x, 0.0, forward.z);
         if (forwardFlat.length() < 1e-6) forwardFlat = safeNormalize(forward);
         else forwardFlat = safeNormalize(forwardFlat);
 
-        // RIGHT should be forward x up (so it points the expected lateral direction)
         Vec3 right = safeNormalize(forwardFlat.cross(worldUp));
         Vec3 up = worldUp;
 
-        // move the whole arc forward so it sits in front of the player
-        double forwardOffsetFactor = 0.5;
-        Vec3 origin = center.add(forwardFlat.scale(radius * forwardOffsetFactor + offset)).add(up.scale(-0.18));
+        // Position the wave in front of the player
+        Vec3 origin = center.add(forwardFlat.scale(radius * 0.3)).add(up.scale(-0.1));
 
-        List<Vec3> innerArc = new ArrayList<>();
-        List<Vec3> outerArc = new ArrayList<>();
+        // Create flowing wave geometry
+        List<Vec3> innerWave = new ArrayList<>();
+        List<Vec3> outerWave = new ArrayList<>();
+        List<Vec3> coreWave = new ArrayList<>();
 
-        int segments = 40;
-        double arcSpan = Math.PI * 0.8;
-        double startAngle = -arcSpan / 2.0;
+        int segments = 60; // More segments for smoother curves
+        double waveSpan = Math.PI * 1.4; // Wider wave
+        double startAngle = -waveSpan / 2.0;
 
         for (int i = 0; i <= segments; i++) {
             double t = (double) i / segments;
-            double angle = startAngle + (arcSpan * t);
+            double angle = startAngle + (waveSpan * t);
 
-            double thickness = Math.sin(t * Math.PI) * 0.3 + 0.1;
-            double baseRadius = radius;
+            // Create flowing wave profile - multiple sine waves for complexity
+            double waveProfile = Math.sin(t * Math.PI); // Base wave shape
+            double flowProfile = Math.sin(t * Math.PI * 2.0) * 0.3; // Secondary wave
+            double energyProfile = Math.sin(t * Math.PI * 0.5) * 0.2; // Energy variation
 
-            double innerRadius = baseRadius * (0.7 - thickness);
-            double outerRadius = baseRadius * (0.7 + thickness);
+            double combinedProfile = waveProfile + flowProfile + energyProfile;
+            combinedProfile = Math.max(0.1, combinedProfile); // Ensure minimum thickness
 
-            // IMPORTANT: forwardFlat * cos + right * sin so center faces forward
-            Vec3 arcDir = forwardFlat.scale(Math.cos(angle)).add(right.scale(Math.sin(angle)));
+            // Dynamic thickness based on position and layer
+            double thickness = combinedProfile * 0.4 + 0.1;
+            double baseRadius = radius * scale;
 
-            double verticalBulge = Math.sin(t * Math.PI) * radius * 0.06;
-            Vec3 bulge = up.scale(verticalBulge);
+            // Create three wave paths for layered effect
+            double innerRadius = baseRadius * (0.5 - thickness * 0.3);
+            double coreRadius = baseRadius * 0.6;
+            double outerRadius = baseRadius * (0.8 + thickness * 0.5);
 
-            Vec3 innerPoint = origin.add(arcDir.scale(innerRadius)).add(bulge);
-            Vec3 outerPoint = origin.add(arcDir.scale(outerRadius)).add(bulge);
+            // Direction vector for wave
+            Vec3 waveDir = forwardFlat.scale(Math.cos(angle)).add(right.scale(Math.sin(angle)));
 
-            innerArc.add(innerPoint);
-            outerArc.add(outerPoint);
+            // Add vertical flow and curvature
+            double verticalFlow = Math.sin(t * Math.PI * 1.5) * radius * 0.08;
+            double forwardFlow = Math.sin(t * Math.PI) * radius * 0.15;
+            Vec3 flowOffset = up.scale(verticalFlow).add(forwardFlat.scale(forwardFlow));
+
+            Vec3 innerPoint = origin.add(waveDir.scale(innerRadius)).add(flowOffset);
+            Vec3 corePoint = origin.add(waveDir.scale(coreRadius)).add(flowOffset);
+            Vec3 outerPoint = origin.add(waveDir.scale(outerRadius)).add(flowOffset);
+
+            innerWave.add(innerPoint);
+            coreWave.add(corePoint);
+            outerWave.add(outerPoint);
         }
 
+        // Render wave geometry with gradient colors
+        renderWaveGeometry(innerWave, coreWave, outerWave, layerIndex, alphaMultiplier, segments);
+    }
+
+    private static void renderWaveGeometry(List<Vec3> innerWave, List<Vec3> coreWave, List<Vec3> outerWave,
+                                           int layerIndex, double alphaMultiplier, int segments) {
         for (int i = 0; i < segments; i++) {
-            Vec3 innerCurrent = innerArc.get(i);
-            Vec3 innerNext = innerArc.get(i + 1);
-            Vec3 outerCurrent = outerArc.get(i);
-            Vec3 outerNext = outerArc.get(i + 1);
+            double positionFactor = 1.0 - (Math.abs(i - segments / 2.0) / (segments / 2.0)) * 0.4;
 
-            double positionAlpha = 1.0 - (Math.abs(i - segments / 2.0) / (segments / 2.0)) * 0.3;
-            int alpha = (int) (255 * alphaMultiplier * positionAlpha * 0.85);
+            // Color gradient from bright core to darker edges
+            int baseAlpha = (int) (255 * alphaMultiplier * positionFactor);
 
-            int r = 200 + (int) (55 * positionAlpha);
-            int g = 255;
-            int b = 255;
-            int color = (alpha << 24) | (r << 16) | (g << 8) | b;
+            // Bright cyan-blue core colors
+            int coreR = 100 + (int) (155 * positionFactor);
+            int coreG = 200 + (int) (55 * positionFactor);
+            int coreB = 255;
+            int coreColor = (baseAlpha << 24) | (coreR << 16) | (coreG << 8) | coreB;
 
-            int[] colors = {color, color, color};
+            // Darker outer colors
+            int outerAlpha = (int) (baseAlpha * 0.6);
+            int outerR = 50 + (int) (100 * positionFactor);
+            int outerG = 150 + (int) (80 * positionFactor);
+            int outerB = 220;
+            int outerColor = (outerAlpha << 24) | (outerR << 16) | (outerG << 8) | outerB;
 
-            VectorRenderer.drawPlaneWorld(innerCurrent, outerCurrent, outerNext, colors, true, 40, VectorRenderer.Transform.IDENTITY);
-            VectorRenderer.drawPlaneWorld(innerCurrent, outerNext, innerNext, colors, true, 40, VectorRenderer.Transform.IDENTITY);
-        }
+            // Render wave segments
+            Vec3 innerCurrent = innerWave.get(i);
+            Vec3 innerNext = innerWave.get(i + 1);
+            Vec3 coreCurrent = coreWave.get(i);
+            Vec3 coreNext = coreWave.get(i + 1);
+            Vec3 outerCurrent = outerWave.get(i);
+            Vec3 outerNext = outerWave.get(i + 1);
 
-        if (offset < 0.01) {
-            renderSlashEdgeGlow(innerArc, outerArc);
+            // Inner to core segment (bright)
+            int[] coreColors = {coreColor, coreColor, coreColor};
+            VectorRenderer.drawPlaneWorld(innerCurrent, coreCurrent, coreNext, coreColors, true, 60, VectorRenderer.Transform.IDENTITY);
+            VectorRenderer.drawPlaneWorld(innerCurrent, coreNext, innerNext, coreColors, true, 60, VectorRenderer.Transform.IDENTITY);
+
+            // Core to outer segment (gradient)
+            int[] gradientColors = {coreColor, outerColor, outerColor};
+            VectorRenderer.drawPlaneWorld(coreCurrent, outerCurrent, outerNext, gradientColors, true, 60, VectorRenderer.Transform.IDENTITY);
+            VectorRenderer.drawPlaneWorld(coreCurrent, outerNext, coreNext, gradientColors, true, 60, VectorRenderer.Transform.IDENTITY);
         }
     }
 
-    private static void renderSlashCore(Vec3 center, Vec3 lookDirection, double radius) {
+    private static void renderSlashEnergyCore(Vec3 center, Vec3 lookDirection, double radius) {
         Vec3 forward = safeNormalize(lookDirection);
         Vec3 worldUp = new Vec3(0, 1, 0);
-
         Vec3 forwardFlat = new Vec3(forward.x, 0.0, forward.z);
         if (forwardFlat.length() < 1e-6) forwardFlat = safeNormalize(forward);
         else forwardFlat = safeNormalize(forwardFlat);
 
         Vec3 right = safeNormalize(forwardFlat.cross(worldUp));
         Vec3 up = worldUp;
+        Vec3 origin = center.add(forwardFlat.scale(radius * 0.3)).add(up.scale(-0.1));
 
-        double forwardOffsetFactor = 0.5;
-        Vec3 origin = center.add(forwardFlat.scale(radius * forwardOffsetFactor)).add(up.scale(-0.18));
-
-        List<Vec3> coreLine = new ArrayList<>();
-        int segments = 40;
-        double arcSpan = Math.PI * 1.1;
-        double startAngle = -arcSpan / 2.0;
+        // Create bright energy core line following the wave
+        List<Vec3> energyCoreLine = new ArrayList<>();
+        int segments = 50;
+        double waveSpan = Math.PI * 1.4;
+        double startAngle = -waveSpan / 2.0;
 
         for (int i = 0; i <= segments; i++) {
             double t = (double) i / segments;
-            double angle = startAngle + (arcSpan * t);
+            double angle = startAngle + (waveSpan * t);
 
-            double crescentProfile = Math.sin(t * Math.PI);
-            double coreRadius = radius * 0.95 * (0.4 + 0.6 * crescentProfile);
-            double forwardOffset = Math.sin(t * Math.PI) * radius * 0.18;
+            double waveProfile = Math.sin(t * Math.PI);
+            double coreRadius = radius * 0.7 * (0.5 + 0.5 * waveProfile);
 
-            // again use forwardFlat*cos + right*sin
+            Vec3 waveDir = forwardFlat.scale(Math.cos(angle)).add(right.scale(Math.sin(angle)));
+            double verticalFlow = Math.sin(t * Math.PI * 1.5) * radius * 0.08;
+            double forwardFlow = Math.sin(t * Math.PI) * radius * 0.15;
+
             Vec3 point = origin
-                    .add(forwardFlat.scale(Math.cos(angle) * coreRadius))
-                    .add(right.scale(Math.sin(angle) * coreRadius * 0.05))
-                    .add(forwardFlat.scale(forwardOffset));
+                    .add(waveDir.scale(coreRadius))
+                    .add(up.scale(verticalFlow))
+                    .add(forwardFlat.scale(forwardFlow));
 
-            coreLine.add(point);
+            energyCoreLine.add(point);
         }
 
-        for (int i = 0; i < coreLine.size() - 1; i++) {
-            VectorRenderer.drawLineWorld(
-                    coreLine.get(i),
-                    coreLine.get(i + 1),
-                    0xFFFFFFFF,
-                    6.0f,
-                    true,
-                    40,
-                    VectorRenderer.Transform.IDENTITY
-            );
+        // Render bright core trail with multiple thickness layers
+        for (int i = 0; i < energyCoreLine.size() - 1; i++) {
+            Vec3 current = energyCoreLine.get(i);
+            Vec3 next = energyCoreLine.get(i + 1);
 
-            VectorRenderer.drawLineWorld(
-                    coreLine.get(i),
-                    coreLine.get(i + 1),
-                    0x8000FFFF,
-                    12.0f,
-                    true,
-                    40,
-                    VectorRenderer.Transform.IDENTITY
-            );
+            // Multiple line thicknesses for glow effect
+            VectorRenderer.drawLineWorld(current, next, 0xFFFFFFFF, 8.0f, true, 80, VectorRenderer.Transform.IDENTITY);
+            VectorRenderer.drawLineWorld(current, next, 0xDDAAFFFF, 12.0f, true, 80, VectorRenderer.Transform.IDENTITY);
+            VectorRenderer.drawLineWorld(current, next, 0x8800DDFF, 16.0f, true, 80, VectorRenderer.Transform.IDENTITY);
         }
     }
 
-    private static void renderSlashEdgeGlow(List<Vec3> innerArc, List<Vec3> outerArc) {
-        for (int i = 0; i < innerArc.size() - 1; i++) {
-            VectorRenderer.drawLineWorld(
-                    innerArc.get(i),
-                    innerArc.get(i + 1),
-                    0xCCFFFFFF,
-                    3.0f,
-                    true,
-                    40,
-                    VectorRenderer.Transform.IDENTITY
-            );
-
-            VectorRenderer.drawLineWorld(
-                    outerArc.get(i),
-                    outerArc.get(i + 1),
-                    0xCC00FFFF,
-                    4.0f,
-                    true,
-                    40,
-                    VectorRenderer.Transform.IDENTITY
-            );
-        }
-
-        if (!innerArc.isEmpty() && !outerArc.isEmpty()) {
-            VectorRenderer.drawLineWorld(
-                    innerArc.get(0),
-                    outerArc.get(0),
-                    0xAAFFFFFF,
-                    3.0f,
-                    true,
-                    40,
-                    VectorRenderer.Transform.IDENTITY
-            );
-
-            VectorRenderer.drawLineWorld(
-                    innerArc.get(innerArc.size() - 1),
-                    outerArc.get(outerArc.size() - 1),
-                    0xAAFFFFFF,
-                    3.0f,
-                    true,
-                    40,
-                    VectorRenderer.Transform.IDENTITY
-            );
-        }
-    }
-
-    private static void renderSlashParticles(Vec3 center, Vec3 lookDirection, double radius) {
+    private static void renderSlashEnergyParticles(Vec3 center, Vec3 lookDirection, double radius) {
         Vec3 forward = safeNormalize(lookDirection);
         Vec3 worldUp = new Vec3(0, 1, 0);
-
         Vec3 forwardFlat = new Vec3(forward.x, 0.0, forward.z);
         if (forwardFlat.length() < 1e-6) forwardFlat = safeNormalize(forward);
         else forwardFlat = safeNormalize(forwardFlat);
 
         Vec3 right = safeNormalize(forwardFlat.cross(worldUp));
         Vec3 up = worldUp;
+        Vec3 origin = center.add(forwardFlat.scale(radius * 0.3)).add(up.scale(-0.1));
 
-        double forwardOffsetFactor = 0.5;
-        Vec3 origin = center.add(forwardFlat.scale(radius * forwardOffsetFactor)).add(up.scale(-0.18));
-
-        int particleCount = 20;
-        double arcSpan = Math.PI * 1.1;
-        double startAngle = -arcSpan / 2.0;
+        // Energy particles along the wave path
+        int particleCount = 40;
+        double waveSpan = Math.PI * 1.4;
+        double startAngle = -waveSpan / 2.0;
 
         for (int i = 0; i < particleCount; i++) {
             double t = (double) i / (particleCount - 1);
-            double angle = startAngle + (arcSpan * t);
+            double angle = startAngle + (waveSpan * t);
 
-            double crescentProfile = Math.sin(t * Math.PI);
-            double particleRadius = radius * (0.7 + 0.5 * crescentProfile + Math.random() * 0.3);
-            double forwardOffset = Math.sin(t * Math.PI) * radius * 0.12;
+            double waveProfile = Math.sin(t * Math.PI);
+            double particleRadius = radius * (0.5 + 0.4 * waveProfile + Math.random() * 0.3);
+
+            Vec3 waveDir = forwardFlat.scale(Math.cos(angle)).add(right.scale(Math.sin(angle)));
+            double verticalFlow = Math.sin(t * Math.PI * 1.5) * radius * 0.08;
+            double forwardFlow = Math.sin(t * Math.PI) * radius * 0.15;
 
             Vec3 particlePos = origin
-                    .add(forwardFlat.scale(Math.cos(angle) * particleRadius))
-                    .add(right.scale(Math.sin(angle) * particleRadius * 0.02))
-                    .add(up.scale(Math.sin(angle) * particleRadius * 0.03))
-                    .add(forwardFlat.scale(forwardOffset));
+                    .add(waveDir.scale(particleRadius))
+                    .add(up.scale(verticalFlow + Math.random() * 0.1 - 0.05))
+                    .add(forwardFlat.scale(forwardFlow));
 
-            VectorRenderer.drawSphereWorld(
-                    particlePos,
-                    0.04f + (float) (Math.random() * 0.03),
-                    0xBB00FFFF,
-                    6, 8,
-                    false,
-                    30 + (int) (Math.random() * 20),
-                    VectorRenderer.Transform.IDENTITY
-            );
+            // Different particle types based on position
+            float particleSize = 0.03f + (float) (Math.random() * 0.04);
+            int particleLifetime = 40 + (int) (Math.random() * 30);
+
+            if (i % 3 == 0) {
+                // Bright energy particles
+                VectorRenderer.drawSphereWorld(particlePos, particleSize, 0xFFFFFFFF, 6, 8, false, particleLifetime, VectorRenderer.Transform.IDENTITY);
+            } else if (i % 3 == 1) {
+                // Blue energy particles
+                VectorRenderer.drawSphereWorld(particlePos, particleSize, 0xFF00DDFF, 6, 8, false, particleLifetime, VectorRenderer.Transform.IDENTITY);
+            } else {
+                // Cyan energy particles
+                VectorRenderer.drawSphereWorld(particlePos, particleSize * 0.8f, 0xDDAAFFFF, 4, 6, false, particleLifetime, VectorRenderer.Transform.IDENTITY);
+            }
+        }
+
+        // Add some trailing energy wisps
+        for (int i = 0; i < 15; i++) {
+            double t = Math.random();
+            double angle = startAngle + (waveSpan * t);
+
+            Vec3 waveDir = forwardFlat.scale(Math.cos(angle)).add(right.scale(Math.sin(angle)));
+            double wispRadius = radius * (0.3 + Math.random() * 0.6);
+            double verticalOffset = (Math.random() - 0.5) * 0.4;
+
+            Vec3 wispPos = origin
+                    .add(waveDir.scale(wispRadius))
+                    .add(up.scale(verticalOffset));
+
+            Vec3 wispEnd = wispPos.add(waveDir.scale(0.3 + Math.random() * 0.4));
+
+            VectorRenderer.drawLineWorld(wispPos, wispEnd, 0xBB88DDFF, 2.0f, true, 50, VectorRenderer.Transform.IDENTITY);
         }
     }
 
     /* ---------------------------
-       Flying slash (projectile)
+       Flying slash (projectile) - Enhanced
        --------------------------- */
     private static void startFlyingSlash(Vec3 startPos, Vec3 direction, double width, double height, double range) {
         int slashId = nextSlashId++;
@@ -297,7 +306,7 @@ public class WorldSlashRenderer {
         if (startTime == null) return true;
 
         double elapsedSeconds = (currentTime - startTime) / 1000.0;
-        double slashSpeed = 0.8;
+        double slashSpeed = 1.2; // Faster movement
         double totalDuration = slash.range / slashSpeed;
 
         if (elapsedSeconds > totalDuration) {
@@ -305,83 +314,81 @@ public class WorldSlashRenderer {
         }
 
         Vec3 currentPos = slash.startPos.add(slash.direction.scale(elapsedSeconds * slashSpeed));
-
         double progress = elapsedSeconds / totalDuration;
-        double sizeMultiplier = 1.0 + (progress * 0.5);
+        double sizeMultiplier = 1.0 + (progress * 0.8);
         double currentWidth = slash.width * sizeMultiplier;
 
         renderFlyingSlashEffect(currentPos, slash.direction, currentWidth, progress);
-
         return false;
     }
 
     private static void renderFlyingSlashEffect(Vec3 center, Vec3 direction, double width, double progress) {
         Vec3 forward = safeNormalize(direction);
         Vec3 worldUp = new Vec3(0, 1, 0);
-
         Vec3 forwardFlat = new Vec3(forward.x, 0.0, forward.z);
         if (forwardFlat.length() < 1e-6) forwardFlat = safeNormalize(forward);
         else forwardFlat = safeNormalize(forwardFlat);
 
         Vec3 right = safeNormalize(forwardFlat.cross(worldUp));
         Vec3 up = worldUp;
+        Vec3 origin = center.add(forwardFlat.scale(width * 0.4)).add(up.scale(-0.15));
 
-        Vec3 origin = center.add(forwardFlat.scale(width * 0.6)).add(up.scale(-0.18));
+        // Create flowing projectile wave
+        List<Vec3> innerWave = new ArrayList<>();
+        List<Vec3> outerWave = new ArrayList<>();
+        List<Vec3> coreWave = new ArrayList<>();
 
-        List<Vec3> innerArc = new ArrayList<>();
-        List<Vec3> outerArc = new ArrayList<>();
-
-        int segments = 20;
-        double arcSpan = Math.PI * 0.6;
-        double startAngle = -arcSpan / 2.0;
+        int segments = 30;
+        double waveSpan = Math.PI * 0.8;
+        double startAngle = -waveSpan / 2.0;
 
         for (int i = 0; i <= segments; i++) {
             double t = (double) i / segments;
-            double angle = startAngle + (arcSpan * t);
+            double angle = startAngle + (waveSpan * t);
 
-            double thickness = Math.sin(t * Math.PI) * 0.2 + 0.05;
-            double baseRadius = width * 0.4;
+            double waveProfile = Math.sin(t * Math.PI);
+            double thickness = waveProfile * 0.3 + 0.1;
+            double baseRadius = width * 0.5;
 
-            double innerRadius = baseRadius * (0.8 - thickness);
-            double outerRadius = baseRadius * (0.8 + thickness);
+            double innerRadius = baseRadius * (0.4 - thickness * 0.2);
+            double coreRadius = baseRadius * 0.5;
+            double outerRadius = baseRadius * (0.7 + thickness * 0.3);
 
-            Vec3 arcDir = forwardFlat.scale(Math.cos(angle)).add(right.scale(Math.sin(angle)));
+            Vec3 waveDir = forwardFlat.scale(Math.cos(angle)).add(right.scale(Math.sin(angle)));
+            double verticalFlow = Math.sin(t * Math.PI) * width * 0.05;
 
-            Vec3 innerPoint = origin.add(arcDir.scale(innerRadius));
-            Vec3 outerPoint = origin.add(arcDir.scale(outerRadius));
+            Vec3 innerPoint = origin.add(waveDir.scale(innerRadius)).add(up.scale(verticalFlow));
+            Vec3 corePoint = origin.add(waveDir.scale(coreRadius)).add(up.scale(verticalFlow));
+            Vec3 outerPoint = origin.add(waveDir.scale(outerRadius)).add(up.scale(verticalFlow));
 
-            innerArc.add(innerPoint);
-            outerArc.add(outerPoint);
+            innerWave.add(innerPoint);
+            coreWave.add(corePoint);
+            outerWave.add(outerPoint);
         }
 
-        int alpha = (int) (255 * (1.0 - progress * 0.5));
-        int baseColor = (alpha << 24) | 0x00FFFF;
+        // Render flying wave with fade-out
+        int alpha = (int) (255 * (1.0 - progress * 0.6));
         for (int i = 0; i < segments; i++) {
-            int[] colors = {baseColor, baseColor, baseColor};
+            int coreColor = (alpha << 24) | 0xFFFFFF;
+            int outerColor = ((alpha / 2) << 24) | 0x00DDFF;
 
-            VectorRenderer.drawPlaneWorld(
-                    innerArc.get(i), outerArc.get(i), outerArc.get(i + 1),
-                    colors, true, 5, VectorRenderer.Transform.IDENTITY
-            );
-            VectorRenderer.drawPlaneWorld(
-                    innerArc.get(i), outerArc.get(i + 1), innerArc.get(i + 1),
-                    colors, true, 5, VectorRenderer.Transform.IDENTITY
-            );
+            int[] coreColors = {coreColor, coreColor, coreColor};
+            int[] outerColors = {outerColor, outerColor, outerColor};
+
+            VectorRenderer.drawPlaneWorld(innerWave.get(i), coreWave.get(i), coreWave.get(i + 1), coreColors, true, 15, VectorRenderer.Transform.IDENTITY);
+            VectorRenderer.drawPlaneWorld(innerWave.get(i), coreWave.get(i + 1), innerWave.get(i + 1), coreColors, true, 15, VectorRenderer.Transform.IDENTITY);
+
+            VectorRenderer.drawPlaneWorld(coreWave.get(i), outerWave.get(i), outerWave.get(i + 1), outerColors, true, 15, VectorRenderer.Transform.IDENTITY);
+            VectorRenderer.drawPlaneWorld(coreWave.get(i), outerWave.get(i + 1), coreWave.get(i + 1), outerColors, true, 15, VectorRenderer.Transform.IDENTITY);
         }
 
-        for (int i = 0; i < innerArc.size() - 1; i++) {
-            Vec3 midPoint = innerArc.get(i).add(outerArc.get(i)).scale(0.5);
-            Vec3 midPointNext = innerArc.get(i + 1).add(outerArc.get(i + 1)).scale(0.5);
-
-            VectorRenderer.drawLineWorld(
-                    midPoint, midPointNext,
-                    (alpha << 24) | 0xFFFFFF,
-                    3.0f, true, 5, VectorRenderer.Transform.IDENTITY
-            );
+        // Bright core trail
+        for (int i = 0; i < coreWave.size() - 1; i++) {
+            VectorRenderer.drawLineWorld(coreWave.get(i), coreWave.get(i + 1), (alpha << 24) | 0xFFFFFF, 4.0f, true, 10, VectorRenderer.Transform.IDENTITY);
         }
     }
 
-    // helper: safely normalize Vec3 (avoid zero-length)
+    // Helper method
     private static Vec3 safeNormalize(Vec3 v) {
         if (v == null) return new Vec3(0, 0, 1);
         double len = v.length();
