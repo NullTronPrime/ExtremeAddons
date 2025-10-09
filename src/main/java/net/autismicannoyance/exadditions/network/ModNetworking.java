@@ -64,7 +64,8 @@ public final class ModNetworking {
         // Flame jet packet - send from server to clients for flame wand effects
         CHANNEL.registerMessage(id(), FlameJetPacket.class,
                 FlameJetPacket::encode, FlameJetPacket::decode, FlameJetPacket::handle);
-        //elec pac
+
+        // Electric packet
         CHANNEL.registerMessage(id(), ElectricityPacket.class,
                 ElectricityPacket::encode, ElectricityPacket::decode, ElectricityPacket::handle);
 
@@ -75,7 +76,8 @@ public final class ModNetworking {
         CHANNEL.registerMessage(id(), WorldSlashPacket.class,
                 WorldSlashPacket::encode, WorldSlashPacket::decode, WorldSlashPacket::handle);
 
+        // Pouch entity sync packet - send from server to clients for real-time pouch dimension view
+        CHANNEL.registerMessage(id(), PouchEntitySyncPacket.class,
+                PouchEntitySyncPacket::encode, PouchEntitySyncPacket::decode, PouchEntitySyncPacket::handle);
     }
-
-
 }
