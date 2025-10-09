@@ -25,6 +25,8 @@ public class ModItems {
             () -> new Item(new Item.Properties()));
     public static final RegistryObject<Item> SHARPENED_DIAMOND= ITEMS.register("sharpened_diamond",
             () -> new Item(new Item.Properties()));
+    public static final RegistryObject<Item> ARCANE_POUCH = ITEMS.register("arcane_pouch",
+            () -> new ArcanePouchItem(new Item.Properties().stacksTo(1).fireResistant().rarity(Rarity.EPIC)));
 
     public static final RegistryObject<Item> STRAWBERRY = ITEMS.register("strawberry",
             () -> new Item(new Item.Properties().food(ModFoods.STRAWBERRY)));

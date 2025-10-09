@@ -148,6 +148,9 @@
   "item.exadditions.worldslasher.tooltip.line2": "§7Hold to charge void energy, release to tear space",
   "item.exadditions.worldslasher.tooltip.line3": "§8Creates a massive vertical arc slash",
   "item.exadditions.worldslasher.tooltip.line4": "§f⚡ §5Propagates in waves of destruction",
-  "item.exadditions.worldslasher.tooltip.line5": "§8Durability: 50 uses"
+  "item.exadditions.worldslasher.tooltip.line5": "§8Durability: 50 uses",
+
+  "item.exadditions.arcane_pouch": "Arcane Pouch",
+  "item.exadditions.arcane_pouch.tooltip": "A pocket dimension"
 
 }

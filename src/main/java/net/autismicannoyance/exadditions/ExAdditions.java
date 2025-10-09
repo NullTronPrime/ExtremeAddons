@@ -147,6 +147,10 @@ public class ExAdditions {
         public static void onClientSetup(FMLClientSetupEvent event) {
             EntityRenderers.register(ModEntities.PLAYERLIKE.get(), PlayerlikeRenderer::new);
             EntityRenderers.register(ModEntities.HEADLESS_ZOMBIE.get(), HeadlessZombieRenderer::new);
+            net.minecraftforge.client.ForgeHooksClient.registerTooltipComponentFactory(
+                    net.autismicannoyance.exadditions.item.custom.ArcanePouchItem.ArcanePouchTooltip.class,
+                    net.autismicannoyance.exadditions.client.ArcanePouchTooltipRenderer::new
+            );
 
             MenuScreens.register(ModMenuTypes.ADVANCED_CRAFTING_MENU.get(), AdvancedCraftingScreen::new);
         }
