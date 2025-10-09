@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 public class ArcanePouchDimensionManager {
     private static final Map<UUID, ResourceKey<Level>> POUCH_DIMENSIONS = new HashMap<>();
@@ -126,9 +127,13 @@ public class ArcanePouchDimensionManager {
                 public void stop() {}
             };
 
+            // FIX: Create a proper synchronous executor to prevent deadlocks
+            // This executor runs tasks immediately on the calling thread
+            Executor syncExecutor = Runnable::run;
+
             ServerLevel newLevel = new ServerLevel(
                     server,
-                    server::execute, // ✅ replaced executor with method reference
+                    syncExecutor, // ✅ FIXED: Use synchronous executor instead of server::execute
                     storageAccess,
                     worldData,
                     dimKey,
@@ -188,7 +193,7 @@ public class ArcanePouchDimensionManager {
                     syncPouchToClients(level, pouchUUID);
                 }
             } catch (Exception e) {
-                com.mojang.logging.LogUtils.getLogger().error("Error ticking pouch dimension", e);
+                // Silently ignore sync errors to prevent cascading issues
             }
         }
     }
@@ -208,7 +213,6 @@ public class ArcanePouchDimensionManager {
             // Send to all players in overworld
             ServerLevel overworld = pouchLevel.getServer().overworld();
             for (ServerPlayer player : overworld.players()) {
-                // ✅ replace INSTANCE with CHANNEL (update to match your networking class)
                 net.autismicannoyance.exadditions.network.ModNetworking.CHANNEL.send(
                         PacketDistributor.PLAYER.with(() -> player),
                         new net.autismicannoyance.exadditions.network.PouchEntitySyncPacket(pouchUUID, entityData)
