@@ -6,10 +6,13 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.progress.ChunkProgressListener;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.dimension.DimensionType;
-import net.minecraft.world.level.storage.PrimaryLevelData;
+import net.minecraft.world.level.dimension.LevelStem;
+import net.minecraft.world.level.storage.LevelStorageSource;
+import net.minecraft.world.level.storage.ServerLevelData;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -52,16 +55,24 @@ public class ArcanePouchDimensionManager {
             if (dimType == null) {
                 dimType = overworld.dimensionType();
             }
-            net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess storage = server.storageSource;
+
+            // Get level storage access via reflection since we need it
+            LevelStorageSource.LevelStorageAccess storageAccess;
+            try {
+                java.lang.reflect.Field storageSourceField = net.minecraft.server.MinecraftServer.class.getDeclaredField("storageSource");
+                storageSourceField.setAccessible(true);
+                storageAccess = (LevelStorageSource.LevelStorageAccess) storageSourceField.get(server);
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to access storage source", e);
+            }
 
             // Get the overworld's level data
-            PrimaryLevelData overworldData = (PrimaryLevelData) overworld.getLevelData();
+            ServerLevelData overworldData = (ServerLevelData) overworld.getLevelData();
 
-            // Create new level data with proper methods
-            PrimaryLevelData worldData = new PrimaryLevelData(
+            // Create new level data - corrected constructor for 1.20.1
+            ServerLevelData worldData = new net.minecraft.world.level.storage.PrimaryLevelData(
                     overworldData.worldGenOptions(),
                     overworldData.getLevelSettings(),
-                    overworldData.getSpecialWorldProperty(),
                     overworldData.worldGenOptions().isOldCustomizedWorld()
             );
 
@@ -71,16 +82,34 @@ public class ArcanePouchDimensionManager {
                                     net.minecraft.world.level.biome.Biomes.THE_VOID)),
                     pouchUUID.getMostSignificantBits());
 
+            LevelStem levelStem = new LevelStem(
+                    registryAccess.registryOrThrow(Registries.DIMENSION_TYPE).getHolderOrThrow(dimTypeKey),
+                    generator
+            );
+
+            // Create proper ChunkProgressListener
+            ChunkProgressListener progressListener = new ChunkProgressListener() {
+                @Override
+                public void updateSpawnPos(net.minecraft.world.level.ChunkPos chunkPos) {}
+
+                @Override
+                public void onStatusChange(net.minecraft.world.level.ChunkPos chunkPos, net.minecraft.world.level.chunk.ChunkStatus status) {}
+
+                @Override
+                public void start() {}
+
+                @Override
+                public void stop() {}
+            };
+
             ServerLevel newLevel = new ServerLevel(
                     server,
                     server.executor,
-                    storage,
+                    storageAccess,
                     worldData,
                     dimKey,
-                    new net.minecraft.world.level.dimension.LevelStem(
-                            registryAccess.registryOrThrow(Registries.DIMENSION_TYPE).getHolderOrThrow(dimTypeKey),
-                            generator),
-                    (progressListener, createStructures) -> {},
+                    levelStem,
+                    progressListener,
                     false,
                     0L,
                     com.google.common.collect.ImmutableList.of(),
@@ -89,6 +118,7 @@ public class ArcanePouchDimensionManager {
             );
             return newLevel;
         } catch (Exception e) {
+            com.mojang.logging.LogUtils.getLogger().error("Failed to create pouch dimension", e);
             return null;
         }
     }
