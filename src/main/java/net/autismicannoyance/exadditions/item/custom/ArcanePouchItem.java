@@ -25,6 +25,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 
 public class ArcanePouchItem extends Item {
     private static final String TAG_POUCH_UUID = "PouchUUID";

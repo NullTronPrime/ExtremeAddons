@@ -9,6 +9,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.dimension.DimensionType;
+import net.minecraft.world.level.storage.PrimaryLevelData;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -52,18 +53,24 @@ public class ArcanePouchDimensionManager {
                 dimType = overworld.dimensionType();
             }
             net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess storage = server.storageSource;
-            net.minecraft.world.level.storage.ServerLevelData worldData =
-                    new net.minecraft.world.level.storage.PrimaryLevelData(
-                            server.getWorldData().worldGenOptions(),
-                            overworld.getLevelData().getLevelSettings(),
-                            overworld.getLevelData().getSpecialWorldProperty(),
-                            overworld.getLevelData().worldGenOptions().isOldCustomizedWorld()
-                    );
+
+            // Get the overworld's level data
+            PrimaryLevelData overworldData = (PrimaryLevelData) overworld.getLevelData();
+
+            // Create new level data with proper methods
+            PrimaryLevelData worldData = new PrimaryLevelData(
+                    overworldData.worldGenOptions(),
+                    overworldData.getLevelSettings(),
+                    overworldData.getSpecialWorldProperty(),
+                    overworldData.worldGenOptions().isOldCustomizedWorld()
+            );
+
             ArcanePouchChunkGenerator generator = new ArcanePouchChunkGenerator(
                     new net.minecraft.world.level.biome.FixedBiomeSource(
                             registryAccess.registryOrThrow(Registries.BIOME).getHolderOrThrow(
                                     net.minecraft.world.level.biome.Biomes.THE_VOID)),
                     pouchUUID.getMostSignificantBits());
+
             ServerLevel newLevel = new ServerLevel(
                     server,
                     server.executor,
