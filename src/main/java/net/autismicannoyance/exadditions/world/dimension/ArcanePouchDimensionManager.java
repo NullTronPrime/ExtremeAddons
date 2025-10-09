@@ -98,13 +98,8 @@ public class ArcanePouchDimensionManager {
                 throw new RuntimeException("Failed to access storage source", e);
             }
 
-            ServerLevelData overworldData = (ServerLevelData) overworld.getLevelData();
-
-            ServerLevelData worldData = new net.minecraft.world.level.storage.PrimaryLevelData(
-                    overworldData.worldGenOptions(),
-                    overworldData.getLevelSettings(),
-                    overworldData.worldGenOptions().isOldCustomizedWorld()
-            );
+            // Use overworld level data instead of broken getters
+            ServerLevelData worldData = (ServerLevelData) overworld.getLevelData();
 
             ArcanePouchChunkGenerator generator = new ArcanePouchChunkGenerator(
                     new net.minecraft.world.level.biome.FixedBiomeSource(
@@ -133,7 +128,7 @@ public class ArcanePouchDimensionManager {
 
             ServerLevel newLevel = new ServerLevel(
                     server,
-                    server.executor,
+                    server::execute, // ✅ replaced executor with method reference
                     storageAccess,
                     worldData,
                     dimKey,
@@ -189,8 +184,6 @@ public class ArcanePouchDimensionManager {
         ServerLevel level = DIMENSION_CACHE.get(pouchUUID);
         if (level != null && !level.getServer().isStopped()) {
             try {
-                // Don't call level.tick() here - server handles that
-                // Just sync entity data
                 if (level.getGameTime() % 10 == 0) {
                     syncPouchToClients(level, pouchUUID);
                 }
@@ -215,7 +208,8 @@ public class ArcanePouchDimensionManager {
             // Send to all players in overworld
             ServerLevel overworld = pouchLevel.getServer().overworld();
             for (ServerPlayer player : overworld.players()) {
-                net.autismicannoyance.exadditions.network.ModNetworking.INSTANCE.send(
+                // ✅ replace INSTANCE with CHANNEL (update to match your networking class)
+                net.autismicannoyance.exadditions.network.ModNetworking.CHANNEL.send(
                         PacketDistributor.PLAYER.with(() -> player),
                         new net.autismicannoyance.exadditions.network.PouchEntitySyncPacket(pouchUUID, entityData)
                 );
