@@ -1,11 +1,9 @@
 package net.autismicannoyance.exadditions.item.custom;
 
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.InteractionHand;
@@ -49,31 +47,40 @@ public class ArcanePouchItem extends Item {
         if (player.level().isClientSide) return InteractionResult.SUCCESS;
         if (target instanceof Player) return InteractionResult.PASS;
 
-        UUID pouchUUID = getPouchUUID(stack);
-        ServerLevel currentLevel = (ServerLevel) player.level();
+        // ✅ FIXED: Remove server.execute() wrapper - we're already on the server thread!
+        try {
+            UUID pouchUUID = getPouchUUID(stack);
+            ServerLevel currentLevel = (ServerLevel) player.level();
 
-        currentLevel.getServer().execute(() -> {
-            try {
-                ServerLevel pouchLevel = ArcanePouchDimensionManager.getOrCreatePouchDimension(currentLevel, pouchUUID);
-                if (pouchLevel == null) return;
+            // Get or create the pouch dimension
+            ServerLevel pouchLevel = ArcanePouchDimensionManager.getOrCreatePouchDimension(currentLevel, pouchUUID);
+            if (pouchLevel == null) {
+                player.displayClientMessage(Component.literal("Failed to create dimension!").withStyle(ChatFormatting.RED), true);
+                return InteractionResult.FAIL;
+            }
 
-                CompoundTag mobTag = new CompoundTag();
-                target.save(mobTag);
+            // Save mob data before teleporting
+            CompoundTag mobTag = new CompoundTag();
+            target.save(mobTag);
 
-                double angle = player.level().random.nextDouble() * Math.PI * 2;
-                double radius = 6 + player.level().random.nextDouble() * 2;
-                double x = Math.cos(angle) * radius;
-                double z = Math.sin(angle) * radius;
+            // Calculate spawn position in pouch
+            double angle = player.level().random.nextDouble() * Math.PI * 2;
+            double radius = 6 + player.level().random.nextDouble() * 2;
+            double x = Math.cos(angle) * radius;
+            double z = Math.sin(angle) * radius;
 
-                target.changeDimension(pouchLevel, new net.minecraftforge.common.util.ITeleporter() {
-                    @Override
-                    public Entity placeEntity(Entity entity, ServerLevel currentWorld, ServerLevel destWorld, float yaw, Function<Boolean, Entity> repositionEntity) {
-                        entity = repositionEntity.apply(false);
-                        entity.moveTo(x, 65, z, yaw, entity.getXRot());
-                        return entity;
-                    }
-                });
+            // Teleport the entity
+            Entity teleported = target.changeDimension(pouchLevel, new net.minecraftforge.common.util.ITeleporter() {
+                @Override
+                public Entity placeEntity(Entity entity, ServerLevel currentWorld, ServerLevel destWorld, float yaw, Function<Boolean, Entity> repositionEntity) {
+                    entity = repositionEntity.apply(false);
+                    entity.moveTo(x, 65, z, yaw, entity.getXRot());
+                    return entity;
+                }
+            });
 
+            if (teleported != null) {
+                // Update pouch NBT data
                 ListTag mobs = stack.getOrCreateTag().getList(TAG_MOBS, 10);
                 CompoundTag entry = new CompoundTag();
                 entry.putUUID("UUID", target.getUUID());
@@ -82,12 +89,16 @@ public class ArcanePouchItem extends Item {
                 stack.getOrCreateTag().put(TAG_MOBS, mobs);
 
                 player.playSound(SoundEvents.ENDERMAN_TELEPORT, 1.0F, 1.0F);
-            } catch (Exception e) {
+                return InteractionResult.CONSUME;
+            } else {
                 player.displayClientMessage(Component.literal("Failed to capture entity!").withStyle(ChatFormatting.RED), true);
+                return InteractionResult.FAIL;
             }
-        });
-
-        return InteractionResult.CONSUME;
+        } catch (Exception e) {
+            player.displayClientMessage(Component.literal("Error: " + e.getMessage()).withStyle(ChatFormatting.RED), true);
+            e.printStackTrace();
+            return InteractionResult.FAIL;
+        }
     }
 
     @Override
@@ -97,32 +108,42 @@ public class ArcanePouchItem extends Item {
 
         ServerLevel serverLevel = (ServerLevel) level;
 
+        // Shift-click: Enter the pouch dimension
         if (player.isShiftKeyDown()) {
-            UUID pouchUUID = getPouchUUID(stack);
+            // ✅ FIXED: Remove server.execute() wrapper - we're already on the server thread!
+            try {
+                UUID pouchUUID = getPouchUUID(stack);
 
-            serverLevel.getServer().execute(() -> {
-                try {
-                    ServerLevel pouchLevel = ArcanePouchDimensionManager.getOrCreatePouchDimension(serverLevel, pouchUUID);
-                    if (pouchLevel == null) return;
-
-                    player.changeDimension(pouchLevel, new net.minecraftforge.common.util.ITeleporter() {
-                        @Override
-                        public Entity placeEntity(Entity entity, ServerLevel currentWorld, ServerLevel destWorld, float yaw, Function<Boolean, Entity> repositionEntity) {
-                            entity = repositionEntity.apply(false);
-                            entity.moveTo(0, 65, 0, yaw, entity.getXRot());
-                            return entity;
-                        }
-                    });
-
-                    player.playSound(SoundEvents.ENDERMAN_TELEPORT, 1.0F, 1.5F);
-                } catch (Exception e) {
-                    player.displayClientMessage(Component.literal("Failed to enter dimension!").withStyle(ChatFormatting.RED), true);
+                ServerLevel pouchLevel = ArcanePouchDimensionManager.getOrCreatePouchDimension(serverLevel, pouchUUID);
+                if (pouchLevel == null) {
+                    player.displayClientMessage(Component.literal("Failed to create dimension!").withStyle(ChatFormatting.RED), true);
+                    return InteractionResultHolder.fail(stack);
                 }
-            });
 
-            return InteractionResultHolder.success(stack);
+                Entity teleported = player.changeDimension(pouchLevel, new net.minecraftforge.common.util.ITeleporter() {
+                    @Override
+                    public Entity placeEntity(Entity entity, ServerLevel currentWorld, ServerLevel destWorld, float yaw, Function<Boolean, Entity> repositionEntity) {
+                        entity = repositionEntity.apply(false);
+                        entity.moveTo(0, 65, 0, yaw, entity.getXRot());
+                        return entity;
+                    }
+                });
+
+                if (teleported != null) {
+                    player.playSound(SoundEvents.ENDERMAN_TELEPORT, 1.0F, 1.5F);
+                    return InteractionResultHolder.success(stack);
+                } else {
+                    player.displayClientMessage(Component.literal("Failed to enter dimension!").withStyle(ChatFormatting.RED), true);
+                    return InteractionResultHolder.fail(stack);
+                }
+            } catch (Exception e) {
+                player.displayClientMessage(Component.literal("Error: " + e.getMessage()).withStyle(ChatFormatting.RED), true);
+                e.printStackTrace();
+                return InteractionResultHolder.fail(stack);
+            }
         }
 
+        // Normal click: Release a dead mob
         ListTag deadMobs = stack.getOrCreateTag().getList(TAG_DEAD_MOBS, 10);
         if (!deadMobs.isEmpty()) {
             CompoundTag deadMob = deadMobs.getCompound(0);
@@ -212,5 +233,6 @@ public class ArcanePouchItem extends Item {
         tooltip.add(Component.literal("Living: " + mobs.size()).withStyle(ChatFormatting.GREEN));
         tooltip.add(Component.literal("Dead: " + dead.size()).withStyle(ChatFormatting.RED));
         tooltip.add(Component.literal("Shift-Right Click to enter").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("Right-click mob to capture").withStyle(ChatFormatting.GRAY));
     }
 }
