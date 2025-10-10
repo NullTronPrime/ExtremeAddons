@@ -1,6 +1,7 @@
 package net.autismicannoyance.exadditions.item.custom;
 
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
@@ -17,6 +18,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.inventory.tooltip.TooltipComponent;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import net.autismicannoyance.exadditions.world.dimension.ArcanePouchDimensionManager;
 import javax.annotation.Nullable;
@@ -28,6 +30,8 @@ public class ArcanePouchItem extends Item {
     private static final String TAG_POUCH_UUID = "PouchUUID";
     private static final String TAG_MOBS = "Mobs";
     private static final String TAG_DEAD_MOBS = "DeadMobs";
+    private static final int PLATFORM_RADIUS = 7; // Safe spawn radius (8 block radius platform, spawn within 7)
+    private static final int PLATFORM_Y = 64;
 
     public ArcanePouchItem(Properties p) {
         super(p);
@@ -42,12 +46,39 @@ public class ArcanePouchItem extends Item {
         return tag.getUUID(TAG_POUCH_UUID);
     }
 
+    /**
+     * Finds a safe spawn position on the platform within the radius
+     */
+    private static Vec3 findSafeSpawnPosition(ServerLevel level, net.minecraft.util.RandomSource random) {
+        // Try to find a spot on the platform
+        for (int attempt = 0; attempt < 10; attempt++) {
+            double angle = random.nextDouble() * Math.PI * 2;
+            // Spawn within safe radius (leave 1 block margin from edge, avoid center diamond block)
+            double radius = 2 + random.nextDouble() * (PLATFORM_RADIUS - 3);
+            double x = Math.cos(angle) * radius;
+            double z = Math.sin(angle) * radius;
+
+            BlockPos checkPos = new BlockPos((int)Math.floor(x), PLATFORM_Y, (int)Math.floor(z));
+            BlockPos abovePos = checkPos.above();
+
+            // Check if position is safe (platform below, air above)
+            if (level.getBlockState(checkPos).isSolid() &&
+                    level.getBlockState(abovePos).isAir() &&
+                    level.getBlockState(abovePos.above()).isAir()) {
+                // Return position centered on block, 1 block above platform
+                return new Vec3(x, PLATFORM_Y + 1.0, z);
+            }
+        }
+
+        // Fallback to a safe spot near center (not ON the diamond block)
+        return new Vec3(2.5, PLATFORM_Y + 1.0, 2.5);
+    }
+
     @Override
     public InteractionResult interactLivingEntity(ItemStack stack, Player player, LivingEntity target, InteractionHand hand) {
         if (player.level().isClientSide) return InteractionResult.SUCCESS;
         if (target instanceof Player) return InteractionResult.PASS;
 
-        // ✅ FIXED: Remove server.execute() wrapper - we're already on the server thread!
         try {
             UUID pouchUUID = getPouchUUID(stack);
             ServerLevel currentLevel = (ServerLevel) player.level();
@@ -63,18 +94,15 @@ public class ArcanePouchItem extends Item {
             CompoundTag mobTag = new CompoundTag();
             target.save(mobTag);
 
-            // Calculate spawn position in pouch
-            double angle = player.level().random.nextDouble() * Math.PI * 2;
-            double radius = 6 + player.level().random.nextDouble() * 2;
-            double x = Math.cos(angle) * radius;
-            double z = Math.sin(angle) * radius;
+            // Find safe spawn position on platform
+            Vec3 spawnPos = findSafeSpawnPosition(pouchLevel, player.level().random);
 
             // Teleport the entity
             Entity teleported = target.changeDimension(pouchLevel, new net.minecraftforge.common.util.ITeleporter() {
                 @Override
                 public Entity placeEntity(Entity entity, ServerLevel currentWorld, ServerLevel destWorld, float yaw, Function<Boolean, Entity> repositionEntity) {
                     entity = repositionEntity.apply(false);
-                    entity.moveTo(x, 65, z, yaw, entity.getXRot());
+                    entity.moveTo(spawnPos.x, spawnPos.y, spawnPos.z, yaw, entity.getXRot());
                     return entity;
                 }
             });
@@ -89,6 +117,10 @@ public class ArcanePouchItem extends Item {
                 stack.getOrCreateTag().put(TAG_MOBS, mobs);
 
                 player.playSound(SoundEvents.ENDERMAN_TELEPORT, 1.0F, 1.0F);
+
+                // Mark dimension as active for ticking
+                ArcanePouchDimensionManager.markDimensionActive(pouchUUID);
+
                 return InteractionResult.CONSUME;
             } else {
                 player.displayClientMessage(Component.literal("Failed to capture entity!").withStyle(ChatFormatting.RED), true);
@@ -110,7 +142,6 @@ public class ArcanePouchItem extends Item {
 
         // Shift-click: Enter the pouch dimension
         if (player.isShiftKeyDown()) {
-            // ✅ FIXED: Remove server.execute() wrapper - we're already on the server thread!
             try {
                 UUID pouchUUID = getPouchUUID(stack);
 
@@ -124,13 +155,19 @@ public class ArcanePouchItem extends Item {
                     @Override
                     public Entity placeEntity(Entity entity, ServerLevel currentWorld, ServerLevel destWorld, float yaw, Function<Boolean, Entity> repositionEntity) {
                         entity = repositionEntity.apply(false);
-                        entity.moveTo(0, 65, 0, yaw, entity.getXRot());
+                        // Spawn player at center of platform (diamond block at 0,64,0, spawn at 0,65,0)
+                        entity.moveTo(0.5, 65.0, 0.5, yaw, entity.getXRot());
+                        entity.setYHeadRot(yaw);
                         return entity;
                     }
                 });
 
                 if (teleported != null) {
                     player.playSound(SoundEvents.ENDERMAN_TELEPORT, 1.0F, 1.5F);
+
+                    // Mark dimension as active for ticking
+                    ArcanePouchDimensionManager.markDimensionActive(pouchUUID);
+
                     return InteractionResultHolder.success(stack);
                 } else {
                     player.displayClientMessage(Component.literal("Failed to enter dimension!").withStyle(ChatFormatting.RED), true);
@@ -164,8 +201,16 @@ public class ArcanePouchItem extends Item {
 
                     try {
                         e.load(loadTag);
-                        Vec3 spawnPos = player.position().add(player.getLookAngle().scale(2));
-                        e.moveTo(spawnPos.x, spawnPos.y, spawnPos.z, level.random.nextFloat() * 360F, 0F);
+
+                        // Find safe spawn position in front of player
+                        Vec3 lookVec = player.getLookAngle();
+                        Vec3 spawnPos = player.position().add(lookVec.scale(2));
+
+                        // Make sure mob spawns on ground
+                        BlockPos groundPos = findGroundBelow(serverLevel, new BlockPos((int)spawnPos.x, (int)spawnPos.y, (int)spawnPos.z));
+
+                        e.moveTo(groundPos.getX() + 0.5, groundPos.getY() + 1, groundPos.getZ() + 0.5,
+                                level.random.nextFloat() * 360F, 0F);
                         level.addFreshEntity(e);
                     } catch (Exception ignored) {}
                 }
@@ -176,6 +221,32 @@ public class ArcanePouchItem extends Item {
         }
 
         return InteractionResultHolder.pass(stack);
+    }
+
+    /**
+     * Finds the ground level below a position
+     */
+    private static BlockPos findGroundBelow(ServerLevel level, BlockPos start) {
+        BlockPos.MutableBlockPos pos = start.mutable();
+
+        // Search down up to 10 blocks
+        for (int i = 0; i < 10; i++) {
+            if (level.getBlockState(pos).isSolid() && level.getBlockState(pos.above()).isAir()) {
+                return pos.immutable();
+            }
+            pos.move(0, -1, 0);
+        }
+
+        // Search up if no ground found below
+        pos.set(start);
+        for (int i = 0; i < 10; i++) {
+            if (level.getBlockState(pos).isSolid() && level.getBlockState(pos.above()).isAir()) {
+                return pos.immutable();
+            }
+            pos.move(0, 1, 0);
+        }
+
+        return start; // Fallback to original position
     }
 
     public static void handleMobDeath(ServerLevel level, LivingEntity entity, UUID pouchUUID) {
@@ -220,6 +291,12 @@ public class ArcanePouchItem extends Item {
     @Override
     public java.util.Optional<TooltipComponent> getTooltipImage(ItemStack stack) {
         UUID uuid = getPouchUUID(stack);
+
+        // Mark dimension as active when tooltip is being viewed
+        if (!stack.getOrCreateTag().getList(TAG_MOBS, 10).isEmpty()) {
+            ArcanePouchDimensionManager.markDimensionActive(uuid);
+        }
+
         return java.util.Optional.of(new ArcanePouchTooltip(uuid));
     }
 
