@@ -35,8 +35,8 @@ public class ArcanePouchDimensionManager {
     private static final Set<UUID> ACTIVE_DIMENSIONS = new HashSet<>();
     private static final Map<UUID, Long> LAST_ACTIVITY = new HashMap<>();
 
-    // Dimensions stay active for 30 seconds after last activity (tooltip viewing or player inside)
-    private static final long ACTIVITY_TIMEOUT = 600; // 30 seconds in ticks (20 ticks/sec)
+    // Dimensions stay active for 30 seconds after last activity
+    private static final long ACTIVITY_TIMEOUT = 600; // 30 seconds in ticks
 
     public static ResourceKey<Level> getPouchDimensionKey(UUID pouchUUID) {
         return POUCH_DIMENSIONS.computeIfAbsent(pouchUUID, uuid ->
@@ -49,6 +49,8 @@ public class ArcanePouchDimensionManager {
         if (DIMENSION_CACHE.containsKey(pouchUUID)) {
             ServerLevel cached = DIMENSION_CACHE.get(pouchUUID);
             if (cached != null && !cached.getServer().isStopped()) {
+                // Ensure chunks are loaded
+                ensureChunksLoaded(cached);
                 return cached;
             }
             DIMENSION_CACHE.remove(pouchUUID);
@@ -72,9 +74,25 @@ public class ArcanePouchDimensionManager {
                 DIMENSION_LOAD_COUNTER.put(pouchUUID, 1);
                 initializePouchTerrain(level);
             }
+
+            // Always ensure chunks are loaded when accessing
+            ensureChunksLoaded(level);
         }
 
         return level;
+    }
+
+    /**
+     * Ensures the spawn chunks are loaded for the dimension
+     */
+    private static void ensureChunksLoaded(ServerLevel level) {
+        // Force load 3x3 chunk area around spawn
+        for (int chunkX = -1; chunkX <= 1; chunkX++) {
+            for (int chunkZ = -1; chunkZ <= 1; chunkZ++) {
+                net.minecraft.world.level.ChunkPos chunkPos = new net.minecraft.world.level.ChunkPos(chunkX, chunkZ);
+                level.setChunkForced(chunkPos.x, chunkPos.z, true);
+            }
+        }
     }
 
     public static ServerLevel getDimensionIfLoaded(UUID pouchUUID) {
@@ -91,7 +109,7 @@ public class ArcanePouchDimensionManager {
         LAST_ACTIVITY.put(pouchUUID, System.currentTimeMillis());
 
         if (wasInactive) {
-            com.mojang.logging.LogUtils.getLogger().info("Pouch dimension {} marked as active", pouchUUID);
+            com.mojang.logging.LogUtils.getLogger().debug("Pouch dimension {} marked as active", pouchUUID);
         }
     }
 
@@ -190,19 +208,16 @@ public class ArcanePouchDimensionManager {
     private static void initializePouchTerrain(ServerLevel level) {
         int radius = 8;
 
-        // Force load spawn chunks around the platform
-        net.minecraft.world.level.ChunkPos centerChunk = new net.minecraft.world.level.ChunkPos(0, 0);
+        // Set spawn position first
+        level.setDefaultSpawnPos(new BlockPos(0, 65, 0), 0);
 
-        // Force load 3x3 chunk area around spawn
+        // Force load spawn chunks around the platform
         for (int chunkX = -1; chunkX <= 1; chunkX++) {
             for (int chunkZ = -1; chunkZ <= 1; chunkZ++) {
                 net.minecraft.world.level.ChunkPos chunkPos = new net.minecraft.world.level.ChunkPos(chunkX, chunkZ);
                 level.setChunkForced(chunkPos.x, chunkPos.z, true);
             }
         }
-
-        // Set spawn position
-        level.setDefaultSpawnPos(new BlockPos(0, 65, 0), 0);
 
         // Build platform
         for (int x = -radius; x <= radius; x++) {
@@ -231,13 +246,13 @@ public class ArcanePouchDimensionManager {
      */
     public static void tickActiveDimensions(ServerLevel overworld) {
         long currentTime = System.currentTimeMillis();
-        Set<UUID> toRemove = new HashSet<>();
+        Set<UUID> toDeactivate = new HashSet<>();
 
         // Check all active dimensions
         for (UUID pouchUUID : new HashSet<>(ACTIVE_DIMENSIONS)) {
             ServerLevel level = DIMENSION_CACHE.get(pouchUUID);
             if (level == null) {
-                toRemove.add(pouchUUID);
+                toDeactivate.add(pouchUUID);
                 continue;
             }
 
@@ -253,29 +268,34 @@ public class ArcanePouchDimensionManager {
                 LAST_ACTIVITY.put(pouchUUID, currentTime);
             } else if (timeSinceActivity > ACTIVITY_TIMEOUT) {
                 // Deactivate if no activity for too long
-                toRemove.add(pouchUUID);
+                toDeactivate.add(pouchUUID);
                 continue;
             }
 
-            // ✅ CRITICAL FIX: Actually tick the dimension!
+            // ✅ FIX: Manually tick entities since the dimension isn't in the main tick loop
             try {
-                // Force the dimension to tick like a normal world
-                // This makes entities move, AI work, damage ticks expire, etc.
-                level.tick(() -> true);
+                // Tick all entities in the dimension
+                for (Entity entity : level.getAllEntities()) {
+                    if (!entity.isRemoved() && entity.isAlive()) {
+                        entity.tick();
+                    }
+                }
 
                 // Sync entities to clients every 0.5 seconds
                 if (level.getGameTime() % 10 == 0) {
                     syncPouchToClients(level, pouchUUID);
                 }
             } catch (Exception e) {
-                // Log but don't crash
-                com.mojang.logging.LogUtils.getLogger().warn("Error ticking pouch dimension: " + e.getMessage());
+                com.mojang.logging.LogUtils.getLogger().warn("Error ticking pouch dimension entities: " + e.getMessage());
             }
         }
 
         // Remove inactive dimensions
-        ACTIVE_DIMENSIONS.removeAll(toRemove);
-        toRemove.forEach(LAST_ACTIVITY::remove);
+        ACTIVE_DIMENSIONS.removeAll(toDeactivate);
+        toDeactivate.forEach(uuid -> {
+            LAST_ACTIVITY.remove(uuid);
+            com.mojang.logging.LogUtils.getLogger().debug("Pouch dimension {} deactivated", uuid);
+        });
     }
 
     private static void syncPouchToClients(ServerLevel pouchLevel, UUID pouchUUID) {

@@ -90,12 +90,17 @@ public class ArcanePouchItem extends Item {
                 return InteractionResult.FAIL;
             }
 
+            // Mark dimension as active immediately BEFORE teleporting
+            ArcanePouchDimensionManager.markDimensionActive(pouchUUID);
+
             // Save mob data before teleporting
             CompoundTag mobTag = new CompoundTag();
             target.save(mobTag);
 
             // Find safe spawn position on platform
             Vec3 spawnPos = findSafeSpawnPosition(pouchLevel, player.level().random);
+
+            com.mojang.logging.LogUtils.getLogger().debug("Teleporting {} to pouch dimension at {}", target.getName().getString(), spawnPos);
 
             // Teleport the entity
             Entity teleported = target.changeDimension(pouchLevel, new net.minecraftforge.common.util.ITeleporter() {
@@ -117,9 +122,7 @@ public class ArcanePouchItem extends Item {
                 stack.getOrCreateTag().put(TAG_MOBS, mobs);
 
                 player.playSound(SoundEvents.ENDERMAN_TELEPORT, 1.0F, 1.0F);
-
-                // Mark dimension as active for ticking
-                ArcanePouchDimensionManager.markDimensionActive(pouchUUID);
+                player.displayClientMessage(Component.literal("Captured " + target.getName().getString()).withStyle(ChatFormatting.GREEN), true);
 
                 return InteractionResult.CONSUME;
             } else {
@@ -128,7 +131,7 @@ public class ArcanePouchItem extends Item {
             }
         } catch (Exception e) {
             player.displayClientMessage(Component.literal("Error: " + e.getMessage()).withStyle(ChatFormatting.RED), true);
-            e.printStackTrace();
+            com.mojang.logging.LogUtils.getLogger().error("Failed to capture entity", e);
             return InteractionResult.FAIL;
         }
     }
@@ -151,6 +154,11 @@ public class ArcanePouchItem extends Item {
                     return InteractionResultHolder.fail(stack);
                 }
 
+                // Mark dimension as active BEFORE teleporting
+                ArcanePouchDimensionManager.markDimensionActive(pouchUUID);
+
+                com.mojang.logging.LogUtils.getLogger().debug("Teleporting player {} to pouch dimension", player.getName().getString());
+
                 Entity teleported = player.changeDimension(pouchLevel, new net.minecraftforge.common.util.ITeleporter() {
                     @Override
                     public Entity placeEntity(Entity entity, ServerLevel currentWorld, ServerLevel destWorld, float yaw, Function<Boolean, Entity> repositionEntity) {
@@ -164,18 +172,15 @@ public class ArcanePouchItem extends Item {
 
                 if (teleported != null) {
                     player.playSound(SoundEvents.ENDERMAN_TELEPORT, 1.0F, 1.5F);
-
-                    // Mark dimension as active for ticking
-                    ArcanePouchDimensionManager.markDimensionActive(pouchUUID);
-
                     return InteractionResultHolder.success(stack);
                 } else {
                     player.displayClientMessage(Component.literal("Failed to enter dimension!").withStyle(ChatFormatting.RED), true);
+                    com.mojang.logging.LogUtils.getLogger().warn("Player teleportation returned null");
                     return InteractionResultHolder.fail(stack);
                 }
             } catch (Exception e) {
                 player.displayClientMessage(Component.literal("Error: " + e.getMessage()).withStyle(ChatFormatting.RED), true);
-                e.printStackTrace();
+                com.mojang.logging.LogUtils.getLogger().error("Failed to teleport player to pouch dimension", e);
                 return InteractionResultHolder.fail(stack);
             }
         }
@@ -292,10 +297,9 @@ public class ArcanePouchItem extends Item {
     public java.util.Optional<TooltipComponent> getTooltipImage(ItemStack stack) {
         UUID uuid = getPouchUUID(stack);
 
-        // Mark dimension as active when tooltip is being viewed
-        if (!stack.getOrCreateTag().getList(TAG_MOBS, 10).isEmpty()) {
-            ArcanePouchDimensionManager.markDimensionActive(uuid);
-        }
+        // CRITICAL: Always mark dimension as active when tooltip is being viewed
+        // This ensures the dimension ticks and entities update their positions
+        ArcanePouchDimensionManager.markDimensionActive(uuid);
 
         return java.util.Optional.of(new ArcanePouchTooltip(uuid));
     }
