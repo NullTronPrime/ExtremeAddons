@@ -3,7 +3,6 @@ package net.autismicannoyance.exadditions.world.dimension;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Holder;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
@@ -47,29 +46,40 @@ public class ArcanePouchChunkGenerator extends ChunkGenerator {
 
     @Override
     public void applyCarvers(WorldGenRegion region, long seed, RandomState randomState, BiomeManager biomeManager,
-                             StructureManager structureManager, ChunkAccess chunk, GenerationStep.Carving step) {}
+                             StructureManager structureManager, ChunkAccess chunk, GenerationStep.Carving step) {
+        // DO NOTHING - no carving
+    }
 
     @Override
     public void buildSurface(WorldGenRegion region, StructureManager structures, RandomState randomState, ChunkAccess chunk) {
         ChunkPos chunkPos = chunk.getPos();
         int minY = chunk.getMinBuildHeight();
         int maxY = chunk.getMaxBuildHeight();
+
+        // FILL EVERYTHING WITH AIR FIRST
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                for (int y = minY; y <= maxY; y++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    chunk.setBlockState(pos, Blocks.AIR.defaultBlockState(), false);
+                }
+            }
+        }
+
+        // THEN place ONLY the platform at Y=64
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
                 int worldX = chunkPos.getMinBlockX() + x;
                 int worldZ = chunkPos.getMinBlockZ() + z;
                 int distSq = worldX * worldX + worldZ * worldZ;
-                boolean isInCircle = distSq <= RADIUS * RADIUS;
-                for (int y = minY; y <= maxY; y++) {
-                    BlockPos pos = new BlockPos(x, y, z);
-                    if (y == PLATFORM_Y && isInCircle) {
-                        if (worldX == 0 && worldZ == 0) {
-                            chunk.setBlockState(pos, Blocks.DIAMOND_BLOCK.defaultBlockState(), false);
-                        } else {
-                            chunk.setBlockState(pos, Blocks.OBSIDIAN.defaultBlockState(), false);
-                        }
+
+                if (distSq <= RADIUS * RADIUS) {
+                    BlockPos platformPos = new BlockPos(x, PLATFORM_Y, z);
+
+                    if (worldX == 0 && worldZ == 0) {
+                        chunk.setBlockState(platformPos, Blocks.DIAMOND_BLOCK.defaultBlockState(), false);
                     } else {
-                        chunk.setBlockState(pos, Blocks.AIR.defaultBlockState(), false);
+                        chunk.setBlockState(platformPos, Blocks.OBSIDIAN.defaultBlockState(), false);
                     }
                 }
             }
@@ -77,7 +87,9 @@ public class ArcanePouchChunkGenerator extends ChunkGenerator {
     }
 
     @Override
-    public void spawnOriginalMobs(WorldGenRegion region) {}
+    public void spawnOriginalMobs(WorldGenRegion region) {
+        // NO MOBS
+    }
 
     @Override
     public int getSeaLevel() {
@@ -86,18 +98,20 @@ public class ArcanePouchChunkGenerator extends ChunkGenerator {
 
     @Override
     public int getSpawnHeight(LevelHeightAccessor level) {
-        return PLATFORM_Y + 1;
+        return PLATFORM_Y + 3;
     }
 
     @Override
     public CompletableFuture<ChunkAccess> fillFromNoise(Executor executor, Blender blender, RandomState randomState,
                                                         StructureManager structureManager, ChunkAccess chunk) {
+        // CRITICAL: Return chunk immediately, don't fill with noise
         return CompletableFuture.completedFuture(chunk);
     }
 
     @Override
     public int getBaseHeight(int x, int z, Heightmap.Types heightmapType, LevelHeightAccessor level, RandomState randomState) {
         int distSq = x * x + z * z;
+        // Only platform exists at Y=64, everything else is void
         return (distSq <= RADIUS * RADIUS) ? PLATFORM_Y : level.getMinBuildHeight();
     }
 
@@ -106,20 +120,28 @@ public class ArcanePouchChunkGenerator extends ChunkGenerator {
         BlockState[] states = new BlockState[level.getHeight()];
         int distSq = x * x + z * z;
         boolean isInCircle = distSq <= RADIUS * RADIUS;
+
+        // Fill EVERYTHING with air
         for (int i = 0; i < states.length; i++) {
-            int y = level.getMinBuildHeight() + i;
-            if (y == PLATFORM_Y && isInCircle) {
-                states[i] = (x == 0 && z == 0) ? Blocks.DIAMOND_BLOCK.defaultBlockState() : Blocks.OBSIDIAN.defaultBlockState();
-            } else {
-                states[i] = Blocks.AIR.defaultBlockState();
+            states[i] = Blocks.AIR.defaultBlockState();
+        }
+
+        // ONLY place platform at Y=64
+        if (isInCircle) {
+            int platformIndex = PLATFORM_Y - level.getMinBuildHeight();
+            if (platformIndex >= 0 && platformIndex < states.length) {
+                states[platformIndex] = (x == 0 && z == 0) ?
+                        Blocks.DIAMOND_BLOCK.defaultBlockState() :
+                        Blocks.OBSIDIAN.defaultBlockState();
             }
         }
+
         return new NoiseColumn(level.getMinBuildHeight(), states);
     }
 
     @Override
     public void addDebugScreenInfo(List<String> info, RandomState randomState, BlockPos pos) {
-        info.add("ArcanePouchDim: 16x16 circle platform");
+        info.add("Arcane Pouch: Pure void + platform at Y=64");
     }
 
     @Override

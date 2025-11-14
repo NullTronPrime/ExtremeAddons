@@ -31,12 +31,11 @@ import java.util.concurrent.Executor;
 public class ArcanePouchDimensionManager {
     private static final Map<UUID, ResourceKey<Level>> POUCH_DIMENSIONS = new HashMap<>();
     private static final Map<UUID, ServerLevel> DIMENSION_CACHE = new HashMap<>();
-    private static final Map<UUID, Integer> DIMENSION_LOAD_COUNTER = new HashMap<>();
+    private static final Map<UUID, Boolean> TERRAIN_INITIALIZED = new HashMap<>();
     private static final Set<UUID> ACTIVE_DIMENSIONS = new HashSet<>();
     private static final Map<UUID, Long> LAST_ACTIVITY = new HashMap<>();
 
-    // Dimensions stay active for 30 seconds after last activity (tooltip viewing or player inside)
-    private static final long ACTIVITY_TIMEOUT = 600; // 30 seconds in ticks (20 ticks/sec)
+    private static final long ACTIVITY_TIMEOUT = 600;
 
     public static ResourceKey<Level> getPouchDimensionKey(UUID pouchUUID) {
         return POUCH_DIMENSIONS.computeIfAbsent(pouchUUID, uuid ->
@@ -45,38 +44,32 @@ public class ArcanePouchDimensionManager {
     }
 
     public static ServerLevel getOrCreatePouchDimension(ServerLevel overworld, UUID pouchUUID) {
-        // Check cache first
         if (DIMENSION_CACHE.containsKey(pouchUUID)) {
             ServerLevel cached = DIMENSION_CACHE.get(pouchUUID);
             if (cached != null && !cached.getServer().isStopped()) {
-                // Always ensure spawn is set correctly
-                cached.setDefaultSpawnPos(new BlockPos(0, 65, 0), 0);
+                cached.setDefaultSpawnPos(new BlockPos(0, 67, 0), 0);
                 return cached;
             }
             DIMENSION_CACHE.remove(pouchUUID);
         }
 
         ResourceKey<Level> dimKey = getPouchDimensionKey(pouchUUID);
-
-        // Try to get existing dimension from server
         ServerLevel level = overworld.getServer().getLevel(dimKey);
 
         if (level == null) {
-            // Create new dimension
             level = createPouchDimension(overworld, pouchUUID);
         }
 
         if (level != null) {
             DIMENSION_CACHE.put(pouchUUID, level);
 
-            // Initialize terrain if needed (only once)
-            if (!DIMENSION_LOAD_COUNTER.containsKey(pouchUUID)) {
-                DIMENSION_LOAD_COUNTER.put(pouchUUID, 1);
+            // Initialize terrain EVERY time if not marked as initialized
+            if (!TERRAIN_INITIALIZED.getOrDefault(pouchUUID, false)) {
                 initializePouchTerrain(level);
+                TERRAIN_INITIALIZED.put(pouchUUID, true);
             }
 
-            // Always ensure spawn position is correct
-            level.setDefaultSpawnPos(new BlockPos(0, 65, 0), 0);
+            level.setDefaultSpawnPos(new BlockPos(0, 67, 0), 0);
         }
 
         return level;
@@ -86,10 +79,6 @@ public class ArcanePouchDimensionManager {
         return DIMENSION_CACHE.get(pouchUUID);
     }
 
-    /**
-     * Mark a dimension as active (being viewed or player inside)
-     * This enables ticking for the dimension
-     */
     public static void markDimensionActive(UUID pouchUUID) {
         boolean wasInactive = !ACTIVE_DIMENSIONS.contains(pouchUUID);
         ACTIVE_DIMENSIONS.add(pouchUUID);
@@ -100,9 +89,6 @@ public class ArcanePouchDimensionManager {
         }
     }
 
-    /**
-     * Check if a player is currently in any pouch dimension
-     */
     public static boolean hasPlayersInDimension(ServerLevel level, UUID pouchUUID) {
         if (level == null) return false;
         ResourceKey<Level> dimKey = getPouchDimensionKey(pouchUUID);
@@ -125,7 +111,6 @@ public class ArcanePouchDimensionManager {
                 dimType = overworld.dimensionType();
             }
 
-            // Get level storage access via reflection
             LevelStorageSource.LevelStorageAccess storageAccess;
             try {
                 java.lang.reflect.Field storageSourceField = net.minecraft.server.MinecraftServer.class.getDeclaredField("storageSource");
@@ -135,7 +120,6 @@ public class ArcanePouchDimensionManager {
                 throw new RuntimeException("Failed to access storage source", e);
             }
 
-            // Use overworld level data
             ServerLevelData worldData = (ServerLevelData) overworld.getLevelData();
 
             ArcanePouchChunkGenerator generator = new ArcanePouchChunkGenerator(
@@ -163,7 +147,6 @@ public class ArcanePouchDimensionManager {
                 public void stop() {}
             };
 
-            // Use synchronous executor to prevent deadlocks
             Executor syncExecutor = Runnable::run;
 
             ServerLevel newLevel = new ServerLevel(
@@ -181,7 +164,6 @@ public class ArcanePouchDimensionManager {
                     null
             );
 
-            // Register dimension with server
             Map<ResourceKey<Level>, ServerLevel> levels = server.forgeGetWorldMap();
             levels.put(dimKey, newLevel);
 
@@ -194,11 +176,9 @@ public class ArcanePouchDimensionManager {
 
     private static void initializePouchTerrain(ServerLevel level) {
         int radius = 8;
+        int clearRadius = 15; // Clear a larger area to be sure
 
-        // Force load spawn chunks around the platform
-        net.minecraft.world.level.ChunkPos centerChunk = new net.minecraft.world.level.ChunkPos(0, 0);
-
-        // Force load 3x3 chunk area around spawn
+        // Force load chunks
         for (int chunkX = -1; chunkX <= 1; chunkX++) {
             for (int chunkZ = -1; chunkZ <= 1; chunkZ++) {
                 net.minecraft.world.level.ChunkPos chunkPos = new net.minecraft.world.level.ChunkPos(chunkX, chunkZ);
@@ -206,39 +186,45 @@ public class ArcanePouchDimensionManager {
             }
         }
 
-        // Set spawn position
-        level.setDefaultSpawnPos(new BlockPos(0, 65, 0), 0);
+        level.setDefaultSpawnPos(new BlockPos(0, 67, 0), 0);
 
-        // Build platform
-        for (int x = -radius; x <= radius; x++) {
-            for (int z = -radius; z <= radius; z++) {
-                if (x * x + z * z <= radius * radius) {
-                    BlockPos platformPos = new BlockPos(x, 64, z);
+        // AGGRESSIVELY CLEAR EVERYTHING in a large area
+        System.out.println("[Pouch] Clearing stone/cobblestone from dimension...");
+        int blocksCleared = 0;
 
-                    // Set platform block
-                    if (x == 0 && z == 0) {
-                        level.setBlock(platformPos, Blocks.DIAMOND_BLOCK.defaultBlockState(), 3);
+        for (int x = -clearRadius; x <= clearRadius; x++) {
+            for (int z = -clearRadius; z <= clearRadius; z++) {
+                // Clear from bedrock to sky - EVERYTHING
+                for (int y = -64; y <= 320; y++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+
+                    // Skip the platform at Y=64 within the circle
+                    int distSq = x * x + z * z;
+                    if (y == 64 && distSq <= radius * radius) {
+                        // This is the platform - place it correctly
+                        if (x == 0 && z == 0) {
+                            level.setBlock(pos, Blocks.DIAMOND_BLOCK.defaultBlockState(), 3);
+                        } else {
+                            level.setBlock(pos, Blocks.OBSIDIAN.defaultBlockState(), 3);
+                        }
                     } else {
-                        level.setBlock(platformPos, Blocks.OBSIDIAN.defaultBlockState(), 3);
-                    }
-
-                    // Clear space above
-                    for (int y = 65; y < 70; y++) {
-                        level.setBlock(new BlockPos(x, y, z), Blocks.AIR.defaultBlockState(), 3);
+                        // EVERYTHING else becomes AIR
+                        if (!level.getBlockState(pos).isAir()) {
+                            level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+                            blocksCleared++;
+                        }
                     }
                 }
             }
         }
+
+        System.out.println("[Pouch] Cleared " + blocksCleared + " non-air blocks");
     }
 
-    /**
-     * Called every server tick to update active pouch dimensions
-     */
     public static void tickActiveDimensions(ServerLevel overworld) {
         long currentTime = System.currentTimeMillis();
         Set<UUID> toRemove = new HashSet<>();
 
-        // Check all active dimensions
         for (UUID pouchUUID : new HashSet<>(ACTIVE_DIMENSIONS)) {
             ServerLevel level = DIMENSION_CACHE.get(pouchUUID);
             if (level == null) {
@@ -246,39 +232,30 @@ public class ArcanePouchDimensionManager {
                 continue;
             }
 
-            // Check if dimension still has activity
             boolean hasPlayers = !level.players().isEmpty();
             Long lastActivity = LAST_ACTIVITY.get(pouchUUID);
             long timeSinceActivity = lastActivity != null ?
-                    (currentTime - lastActivity) / 50 : // Convert to ticks (50ms per tick)
+                    (currentTime - lastActivity) / 50 :
                     Long.MAX_VALUE;
 
             if (hasPlayers) {
-                // Keep active if players inside
                 LAST_ACTIVITY.put(pouchUUID, currentTime);
             } else if (timeSinceActivity > ACTIVITY_TIMEOUT) {
-                // Deactivate if no activity for too long
                 toRemove.add(pouchUUID);
                 continue;
             }
 
-            // ✅ CRITICAL FIX: Actually tick the dimension!
             try {
-                // Force the dimension to tick like a normal world
-                // This makes entities move, AI work, damage ticks expire, etc.
                 level.tick(() -> true);
 
-                // Sync entities to clients every 0.5 seconds
                 if (level.getGameTime() % 10 == 0) {
                     syncPouchToClients(level, pouchUUID);
                 }
             } catch (Exception e) {
-                // Log but don't crash
                 com.mojang.logging.LogUtils.getLogger().warn("Error ticking pouch dimension: " + e.getMessage());
             }
         }
 
-        // Remove inactive dimensions
         ACTIVE_DIMENSIONS.removeAll(toRemove);
         toRemove.forEach(LAST_ACTIVITY::remove);
     }
@@ -295,7 +272,6 @@ public class ArcanePouchDimensionManager {
                 entityData.add(tag);
             }
 
-            // Send to all players in overworld who might be viewing the tooltip
             ServerLevel overworld = pouchLevel.getServer().overworld();
             for (ServerPlayer player : overworld.players()) {
                 net.autismicannoyance.exadditions.network.ModNetworking.CHANNEL.send(
@@ -304,7 +280,6 @@ public class ArcanePouchDimensionManager {
                 );
             }
 
-            // Also send to players inside the dimension
             for (ServerPlayer player : pouchLevel.players()) {
                 net.autismicannoyance.exadditions.network.ModNetworking.CHANNEL.send(
                         PacketDistributor.PLAYER.with(() -> player),
@@ -319,7 +294,7 @@ public class ArcanePouchDimensionManager {
     public static void cleanup() {
         DIMENSION_CACHE.clear();
         POUCH_DIMENSIONS.clear();
-        DIMENSION_LOAD_COUNTER.clear();
+        TERRAIN_INITIALIZED.clear();
         ACTIVE_DIMENSIONS.clear();
         LAST_ACTIVITY.clear();
     }
