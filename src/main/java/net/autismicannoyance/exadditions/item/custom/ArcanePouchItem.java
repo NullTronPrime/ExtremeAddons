@@ -33,6 +33,7 @@ public class ArcanePouchItem extends Item {
     private static final String TAG_POUCH_UUID = "PouchUUID";
     private static final String TAG_MOBS = "Mobs";
     private static final String TAG_DEAD_MOBS = "DeadMobs";
+    private static final String TAG_RETURN_POS = "ReturnPos"; // Store return position
     private static final int PLATFORM_RADIUS = 7; // Safe spawn radius (8 block radius platform, spawn within 7)
     private static final int PLATFORM_Y = 64;
 
@@ -155,15 +156,32 @@ public class ArcanePouchItem extends Item {
 
         ServerLevel overworld = serverPlayer.getServer().overworld();
 
-        // Find safe exit position
-        BlockPos exitPos = findSafeExitPosition(overworld, serverPlayer.blockPosition());
+        // Retrieve stored return position from NBT, or use world spawn as fallback
+        BlockPos exitPos;
+        CompoundTag tag = stack.getOrCreateTag();
+        if (tag.contains(TAG_RETURN_POS)) {
+            CompoundTag posTag = tag.getCompound(TAG_RETURN_POS);
+            exitPos = new BlockPos(
+                    posTag.getInt("X"),
+                    posTag.getInt("Y"),
+                    posTag.getInt("Z")
+            );
+            // Clear the stored position after use
+            tag.remove(TAG_RETURN_POS);
+        } else {
+            // Fallback to world spawn if no position stored
+            exitPos = overworld.getSharedSpawnPos();
+        }
+
+        // Find safe exit position near the stored/spawn location
+        BlockPos safePos = findSafeExitPosition(overworld, exitPos);
 
         serverPlayer.changeDimension(overworld, new ITeleporter() {
             @Override
             public Entity placeEntity(Entity entity, ServerLevel currentWorld, ServerLevel destWorld, float yaw, Function<Boolean, Entity> repositionEntity) {
                 entity = repositionEntity.apply(false);
                 // Teleport to safe position (center of block, 1 block above ground)
-                entity.moveTo(exitPos.getX() + 0.5, exitPos.getY() + 1, exitPos.getZ() + 0.5, yaw, entity.getXRot());
+                entity.moveTo(safePos.getX() + 0.5, safePos.getY() + 1, safePos.getZ() + 0.5, yaw, entity.getXRot());
                 return entity;
             }
         });
@@ -174,25 +192,22 @@ public class ArcanePouchItem extends Item {
 
     /**
      * Finds a safe exit position in the overworld.
-     * Prioritizes: world spawn, then searches nearby for safe ground.
+     * Searches around the provided position for safe ground.
      */
-    private static BlockPos findSafeExitPosition(ServerLevel level, BlockPos originalPos) {
-        // Start from world spawn
-        BlockPos spawnPos = level.getSharedSpawnPos();
-
-        // Try spawn position first
-        if (isSafePosition(level, spawnPos)) {
-            return spawnPos;
+    private static BlockPos findSafeExitPosition(ServerLevel level, BlockPos targetPos) {
+        // Try target position first
+        if (isSafePosition(level, targetPos)) {
+            return targetPos;
         }
 
-        // Search for safe ground near spawn in expanding circles
+        // Search for safe ground around target in expanding circles
         for (int radius = 1; radius <= 10; radius++) {
             for (int x = -radius; x <= radius; x++) {
                 for (int z = -radius; z <= radius; z++) {
                     // Only check perimeter of current radius
                     if (Math.abs(x) != radius && Math.abs(z) != radius) continue;
 
-                    BlockPos testPos = spawnPos.offset(x, 0, z);
+                    BlockPos testPos = targetPos.offset(x, 0, z);
                     BlockPos groundPos = findGroundBelow(level, testPos);
 
                     if (isSafePosition(level, groundPos)) {
@@ -202,8 +217,8 @@ public class ArcanePouchItem extends Item {
             }
         }
 
-        // Last resort: spawn position + 10 blocks up (will fall to ground)
-        return spawnPos.above(10);
+        // Last resort: target position + 10 blocks up (will fall to ground)
+        return targetPos.above(10);
     }
 
     /**
@@ -251,12 +266,20 @@ public class ArcanePouchItem extends Item {
                     return InteractionResultHolder.fail(stack);
                 }
 
+                // Store player's current position for return
+                BlockPos currentPos = player.blockPosition();
+                CompoundTag posTag = new CompoundTag();
+                posTag.putInt("X", currentPos.getX());
+                posTag.putInt("Y", currentPos.getY());
+                posTag.putInt("Z", currentPos.getZ());
+                stack.getOrCreateTag().put(TAG_RETURN_POS, posTag);
+
                 Entity teleported = player.changeDimension(pouchLevel, new net.minecraftforge.common.util.ITeleporter() {
                     @Override
                     public Entity placeEntity(Entity entity, ServerLevel currentWorld, ServerLevel destWorld, float yaw, Function<Boolean, Entity> repositionEntity) {
                         entity = repositionEntity.apply(false);
-                        // Spawn player at center of platform (diamond block at 0,64,0, spawn at 0,65,0)
-                        entity.moveTo(0.5, 65.0, 0.5, yaw, entity.getXRot());
+                        // Spawn player at EXACTLY 0, 65, 0 (center of diamond block platform)
+                        entity.moveTo(0, 65, 0, yaw, entity.getXRot());
                         entity.setYHeadRot(yaw);
                         return entity;
                     }
