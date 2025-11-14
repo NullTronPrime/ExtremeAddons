@@ -278,8 +278,7 @@ public class ArcanePouchItem extends Item {
                     @Override
                     public Entity placeEntity(Entity entity, ServerLevel currentWorld, ServerLevel destWorld, float yaw, Function<Boolean, Entity> repositionEntity) {
                         entity = repositionEntity.apply(false);
-                        // Spawn player at EXACTLY 0, 65, 0 (center of diamond block platform)
-                        entity.moveTo(0, 65, 0, yaw, entity.getXRot());
+                        entity.moveTo(0, 67, 0, yaw, entity.getXRot());
                         entity.setYHeadRot(yaw);
                         return entity;
                     }
