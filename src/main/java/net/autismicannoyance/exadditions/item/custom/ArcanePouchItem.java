@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.InteractionHand;
@@ -21,6 +22,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import net.autismicannoyance.exadditions.world.dimension.ArcanePouchDimensionManager;
+import net.minecraftforge.common.util.ITeleporter;
+
 import javax.annotation.Nullable;
 import java.util.List;
 import java.util.UUID;
@@ -90,17 +93,12 @@ public class ArcanePouchItem extends Item {
                 return InteractionResult.FAIL;
             }
 
-            // Mark dimension as active immediately BEFORE teleporting
-            ArcanePouchDimensionManager.markDimensionActive(pouchUUID);
-
             // Save mob data before teleporting
             CompoundTag mobTag = new CompoundTag();
             target.save(mobTag);
 
             // Find safe spawn position on platform
             Vec3 spawnPos = findSafeSpawnPosition(pouchLevel, player.level().random);
-
-            com.mojang.logging.LogUtils.getLogger().debug("Teleporting {} to pouch dimension at {}", target.getName().getString(), spawnPos);
 
             // Teleport the entity
             Entity teleported = target.changeDimension(pouchLevel, new net.minecraftforge.common.util.ITeleporter() {
@@ -122,7 +120,9 @@ public class ArcanePouchItem extends Item {
                 stack.getOrCreateTag().put(TAG_MOBS, mobs);
 
                 player.playSound(SoundEvents.ENDERMAN_TELEPORT, 1.0F, 1.0F);
-                player.displayClientMessage(Component.literal("Captured " + target.getName().getString()).withStyle(ChatFormatting.GREEN), true);
+
+                // Mark dimension as active for ticking
+                ArcanePouchDimensionManager.markDimensionActive(pouchUUID);
 
                 return InteractionResult.CONSUME;
             } else {
@@ -131,8 +131,94 @@ public class ArcanePouchItem extends Item {
             }
         } catch (Exception e) {
             player.displayClientMessage(Component.literal("Error: " + e.getMessage()).withStyle(ChatFormatting.RED), true);
-            com.mojang.logging.LogUtils.getLogger().error("Failed to capture entity", e);
+            e.printStackTrace();
             return InteractionResult.FAIL;
+        }
+    }
+
+    /**
+     * Check if player is in a pouch dimension
+     */
+    private boolean isInPouchDimension(Player player) {
+        ResourceKey<Level> dimKey = player.level().dimension();
+        String dimPath = dimKey.location().getPath();
+        return dimPath.startsWith("pouch_");
+    }
+
+    /**
+     * Teleport player out of pouch dimension to overworld
+     */
+    private boolean exitPouchDimension(Player player, ItemStack stack) {
+        if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)) {
+            return false;
+        }
+
+        ServerLevel overworld = serverPlayer.getServer().overworld();
+
+        // Find safe exit position
+        BlockPos exitPos = findSafeExitPosition(overworld, serverPlayer.blockPosition());
+
+        serverPlayer.changeDimension(overworld, new ITeleporter() {
+            @Override
+            public Entity placeEntity(Entity entity, ServerLevel currentWorld, ServerLevel destWorld, float yaw, Function<Boolean, Entity> repositionEntity) {
+                entity = repositionEntity.apply(false);
+                // Teleport to safe position (center of block, 1 block above ground)
+                entity.moveTo(exitPos.getX() + 0.5, exitPos.getY() + 1, exitPos.getZ() + 0.5, yaw, entity.getXRot());
+                return entity;
+            }
+        });
+
+        player.playSound(SoundEvents.ENDERMAN_TELEPORT, 1.0F, 1.5F);
+        return true;
+    }
+
+    /**
+     * Finds a safe exit position in the overworld.
+     * Prioritizes: world spawn, then searches nearby for safe ground.
+     */
+    private static BlockPos findSafeExitPosition(ServerLevel level, BlockPos originalPos) {
+        // Start from world spawn
+        BlockPos spawnPos = level.getSharedSpawnPos();
+
+        // Try spawn position first
+        if (isSafePosition(level, spawnPos)) {
+            return spawnPos;
+        }
+
+        // Search for safe ground near spawn in expanding circles
+        for (int radius = 1; radius <= 10; radius++) {
+            for (int x = -radius; x <= radius; x++) {
+                for (int z = -radius; z <= radius; z++) {
+                    // Only check perimeter of current radius
+                    if (Math.abs(x) != radius && Math.abs(z) != radius) continue;
+
+                    BlockPos testPos = spawnPos.offset(x, 0, z);
+                    BlockPos groundPos = findGroundBelow(level, testPos);
+
+                    if (isSafePosition(level, groundPos)) {
+                        return groundPos;
+                    }
+                }
+            }
+        }
+
+        // Last resort: spawn position + 10 blocks up (will fall to ground)
+        return spawnPos.above(10);
+    }
+
+    /**
+     * Checks if a position is safe for player teleportation.
+     * Requirements: solid block below, 2 air blocks above
+     */
+    private static boolean isSafePosition(ServerLevel level, BlockPos pos) {
+        try {
+            return level.getBlockState(pos).isSolid() &&
+                    level.getBlockState(pos.above()).isAir() &&
+                    level.getBlockState(pos.above(2)).isAir() &&
+                    !level.getBlockState(pos).is(net.minecraft.world.level.block.Blocks.LAVA) &&
+                    !level.getBlockState(pos).is(net.minecraft.world.level.block.Blocks.FIRE);
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -142,6 +228,17 @@ public class ArcanePouchItem extends Item {
         if (level.isClientSide) return InteractionResultHolder.pass(stack);
 
         ServerLevel serverLevel = (ServerLevel) level;
+
+        // Check if player is inside a pouch dimension
+        if (isInPouchDimension(player)) {
+            // Right-click with pouch while inside = exit
+            if (exitPouchDimension(player, stack)) {
+                return InteractionResultHolder.success(stack);
+            } else {
+                player.displayClientMessage(Component.literal("Failed to exit dimension!").withStyle(ChatFormatting.RED), true);
+                return InteractionResultHolder.fail(stack);
+            }
+        }
 
         // Shift-click: Enter the pouch dimension
         if (player.isShiftKeyDown()) {
@@ -153,11 +250,6 @@ public class ArcanePouchItem extends Item {
                     player.displayClientMessage(Component.literal("Failed to create dimension!").withStyle(ChatFormatting.RED), true);
                     return InteractionResultHolder.fail(stack);
                 }
-
-                // Mark dimension as active BEFORE teleporting
-                ArcanePouchDimensionManager.markDimensionActive(pouchUUID);
-
-                com.mojang.logging.LogUtils.getLogger().debug("Teleporting player {} to pouch dimension", player.getName().getString());
 
                 Entity teleported = player.changeDimension(pouchLevel, new net.minecraftforge.common.util.ITeleporter() {
                     @Override
@@ -172,15 +264,18 @@ public class ArcanePouchItem extends Item {
 
                 if (teleported != null) {
                     player.playSound(SoundEvents.ENDERMAN_TELEPORT, 1.0F, 1.5F);
+
+                    // Mark dimension as active for ticking
+                    ArcanePouchDimensionManager.markDimensionActive(pouchUUID);
+
                     return InteractionResultHolder.success(stack);
                 } else {
                     player.displayClientMessage(Component.literal("Failed to enter dimension!").withStyle(ChatFormatting.RED), true);
-                    com.mojang.logging.LogUtils.getLogger().warn("Player teleportation returned null");
                     return InteractionResultHolder.fail(stack);
                 }
             } catch (Exception e) {
                 player.displayClientMessage(Component.literal("Error: " + e.getMessage()).withStyle(ChatFormatting.RED), true);
-                com.mojang.logging.LogUtils.getLogger().error("Failed to teleport player to pouch dimension", e);
+                e.printStackTrace();
                 return InteractionResultHolder.fail(stack);
             }
         }
@@ -297,9 +392,10 @@ public class ArcanePouchItem extends Item {
     public java.util.Optional<TooltipComponent> getTooltipImage(ItemStack stack) {
         UUID uuid = getPouchUUID(stack);
 
-        // CRITICAL: Always mark dimension as active when tooltip is being viewed
-        // This ensures the dimension ticks and entities update their positions
-        ArcanePouchDimensionManager.markDimensionActive(uuid);
+        // Mark dimension as active when tooltip is being viewed
+        if (!stack.getOrCreateTag().getList(TAG_MOBS, 10).isEmpty()) {
+            ArcanePouchDimensionManager.markDimensionActive(uuid);
+        }
 
         return java.util.Optional.of(new ArcanePouchTooltip(uuid));
     }
@@ -314,6 +410,7 @@ public class ArcanePouchItem extends Item {
         tooltip.add(Component.literal("Living: " + mobs.size()).withStyle(ChatFormatting.GREEN));
         tooltip.add(Component.literal("Dead: " + dead.size()).withStyle(ChatFormatting.RED));
         tooltip.add(Component.literal("Shift-Right Click to enter").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("Right-click inside to exit").withStyle(ChatFormatting.GRAY));
         tooltip.add(Component.literal("Right-click mob to capture").withStyle(ChatFormatting.GRAY));
     }
 }
